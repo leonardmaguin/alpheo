@@ -25,9 +25,11 @@ COLUMNS = [
     "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
     "Date ajout",
     "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
+    "Résumé P1",            # raison rejet P1 ou vide si GO
     "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
     "Date scoring P2",      # date de la passe 2 (vide si non réalisée)
     "Score P2 /10",         # score passe 2 (vide si P2 non réalisée)
+    "Recommandation P2",    # GO ou NO GO selon Claude en P2 (vide si P2 non réalisée)
     "Score Rôle",
     "Score Entreprise",
     "Score Localisation",
@@ -36,7 +38,7 @@ COLUMNS = [
     "Localisation",
     "Salaire affiché",
     "Salaire estimé",       # estimé par Claude en passe 2
-    "Résumé / Raison rejet",
+    "Résumé",               # analyse complète P2 (vide si P2 non réalisée)
     "Points forts",
     "Red flags",
     "Taille entreprise",
@@ -139,44 +141,51 @@ def job_to_row(job: dict) -> list:
     """Convertit un job dict en ligne Google Sheets."""
     is_rejected = job.get("hard_reject", False)
     scored_p2 = job.get("scored_p2", False)  # True uniquement si la passe 2 a été exécutée
+    score_p1 = job.get("score_p1", job.get("score_total", 0))
     score_p2 = job.get("score_total", 0) if scored_p2 else ""
     date_p2 = job.get("date_scoring_p2", "") if scored_p2 else ""
-    score_p1 = job.get("score_p1", job.get("score_total", 0))
 
-    # Pour Accepté : utilise score_p2 si disponible, sinon score_p1
     effective_score = job.get("score_total", 0)
     accepted = not is_rejected and effective_score >= SHORTLIST_THRESHOLD
 
-    summary = job.get("reject_reason", "") if is_rejected else job.get("summary", "")
-    salary_displayed = job.get("salary", "")
-    salary_estimate = job.get("salary_estimate", "")
-    description = job.get("description", "")
-    company_description = job.get("company_description", "")
+    # Résumé P1 : raison rejet si rejeté en P1 (pas de P2), vide sinon
+    resume_p1 = job.get("reject_reason", "") if (is_rejected and not scored_p2) else ""
+
+    # Résumé P2 : analyse complète Claude, uniquement si P2 réalisée
+    resume_p2 = job.get("summary", "") if scored_p2 else ""
+
+    # Recommandation P2 : priorité à la valeur retournée par Claude, sinon dérivée du score
+    if scored_p2:
+        reco_p2 = job.get("recommendation") or ("NO GO" if is_rejected else ("GO" if effective_score >= SHORTLIST_THRESHOLD else "NO GO"))
+    else:
+        reco_p2 = ""
 
     return [
         job.get("email_date", ""),
         datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
         score_p1,
+        resume_p1,
         "TRUE" if accepted else "FALSE",
-        date_p2,            # vide si pas de P2
-        score_p2,           # vide si pas de P2
+        date_p2,
+        score_p2,
+        reco_p2,
         job.get("score_role", "") if scored_p2 else "",
         job.get("score_company", "") if scored_p2 else "",
         job.get("score_location", "") if scored_p2 else "",
         job.get("title", ""),
         job.get("company", ""),
         job.get("location", ""),
-        salary_displayed,
-        salary_estimate,
-        summary,
-        job.get("strengths", ""),
-        job.get("red_flags", ""),
+        job.get("salary", ""),
+        job.get("salary_estimate", "") if scored_p2 else "",
+        resume_p2,
+        job.get("strengths", "") if scored_p2 else "",
+        job.get("red_flags", "") if scored_p2 else "",
         job.get("company_size", ""),
         job.get("company_industry", ""),
         job.get("seniority_level", ""),
         job.get("company_funding", ""),
-        company_description,
-        description,
+        job.get("company_description", ""),
+        job.get("description", ""),
         job.get("url", ""),
         job.get("source", ""),
         "",  # Statut — à remplir manuellement
