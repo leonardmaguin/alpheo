@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
-from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet
+from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, _col_letter
 
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
@@ -67,6 +67,124 @@ def run_test_mode():
     ]
 
 
+def run_rescore_p2(min_score: int, enrich_limit: int = None):
+    """
+    Récupère depuis le Sheets toutes les lignes sans Date scoring P2 et Score P1 >= min_score,
+    les enrichit via l'API si nécessaire, les rescore en P2, et met à jour les lignes en place.
+    """
+    service = get_sheets_service()
+    sid = get_or_create_spreadsheet(service, SPREADSHEET_ID)
+
+    print(f"\n[Rescore P2] Lecture du Sheets (Score P1 >= {min_score}, sans P2)...")
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sid, range=f"{TAB_NAME}!A2:AC5000"
+    ).execute()
+    rows = result.get("values", [])
+
+    def col(name):
+        idx = COLUMNS.index(name)
+        return lambda row: row[idx] if idx < len(row) else ""
+
+    get_score_p1   = col("Score P1 /10")
+    get_date_p2    = col("Date scoring P2")
+    get_url        = col("URL")
+    get_title      = col("Titre")
+    get_company    = col("Entreprise")
+    get_location   = col("Localisation")
+    get_salary     = col("Salaire affiché")
+    get_email_date = col("Date offre")
+
+    to_rescore = []
+    for i, row in enumerate(rows):
+        score_p1_raw = get_score_p1(row)
+        date_p2 = get_date_p2(row)
+        if not score_p1_raw or date_p2:
+            continue
+        try:
+            score_p1 = int(score_p1_raw)
+        except ValueError:
+            continue
+        if score_p1 < min_score:
+            continue
+        to_rescore.append({
+            "sheet_row": i + 2,  # 1-indexed, +1 pour header
+            "id": f"rescore_{i}",
+            "score_p1": score_p1,
+            "url": get_url(row),
+            "title": get_title(row),
+            "company": get_company(row),
+            "location": get_location(row),
+            "salary": get_salary(row),
+            "email_date": get_email_date(row),
+            "description": "",
+            "source": "sheets_rescore",
+            "collected_at": "",
+        })
+
+    if not to_rescore:
+        print("[Rescore P2] Aucune offre à rescorer.")
+        return
+
+    print(f"[Rescore P2] {len(to_rescore)} offre(s) à traiter :")
+    for j in to_rescore:
+        print(f"  ligne {j['sheet_row']} | {j['score_p1']}/10 | {j['title']} @ {j['company']}")
+
+    # Enrichissement
+    print(f"\n[Rescore P2] Enrichissement ({len(to_rescore)} offres)...")
+    to_rescore = enrich_jobs_with_api(
+        to_rescore,
+        max_jobs=enrich_limit,
+        sheets_service=service,
+        spreadsheet_id=sid,
+    )
+
+    has_desc = [j for j in to_rescore if len(j.get("description", "")) > 150]
+    no_desc  = [j for j in to_rescore if len(j.get("description", "")) <= 150]
+    if no_desc:
+        print(f"[Rescore P2] {len(no_desc)} offre(s) sans description (pas d'appel P2) :")
+        for j in no_desc:
+            print(f"  {j['title']} @ {j['company']}")
+
+    if not has_desc:
+        print("[Rescore P2] Aucune description disponible — arrêt.")
+        return
+
+    # Scoring P2
+    print(f"\n[Rescore P2] Scoring P2 sur {len(has_desc)} offre(s)...")
+    from scorer import score_pass2
+    rescored = score_pass2(has_desc, verbose=True)
+    p2_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+    # Index url → sheet_row pour mise à jour
+    url_to_row = {j["url"]: j["sheet_row"] for j in to_rescore}
+
+    last_col = _col_letter(len(COLUMNS) - 1)
+    updated = 0
+    for scored in rescored:
+        d = scored.to_dict()
+        d["scored_p2"] = True
+        d["date_scoring_p2"] = p2_date
+        url = d.get("url", "")
+        row_num = url_to_row.get(url)
+        if not row_num:
+            print(f"[Rescore P2] URL introuvable dans le Sheets : {url}")
+            continue
+        row_data = job_to_row(d)
+        while len(row_data) < len(COLUMNS):
+            row_data.append("")
+        service.spreadsheets().values().update(
+            spreadsheetId=sid,
+            range=f"{TAB_NAME}!A{row_num}:{last_col}{row_num}",
+            valueInputOption="USER_ENTERED",
+            body={"values": [row_data]},
+        ).execute()
+        reco = d.get("recommendation", "")
+        print(f"[Rescore P2] Ligne {row_num} mise à jour — {d['title']} @ {d['company']} → {d.get('score_total','?')}/10 {reco}")
+        updated += 1
+
+    print(f"\n[Rescore P2] {updated} ligne(s) mises à jour dans le Sheets.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Job Scanner — trouve les offres qui te correspondent")
     parser.add_argument("--days", type=int, default=1, help="Nombre de jours à couvrir (défaut: 1)")
@@ -80,11 +198,19 @@ def main():
                         help="Limite le nombre d'appels API réels (ex: --enrich-limit 1 pour tester)")
     parser.add_argument("--no-sheets", action="store_true", help="N'écrit pas dans Google Sheets")
     parser.add_argument("--output-json", type=str, help="Sauvegarde les résultats en JSON")
+    parser.add_argument("--rescore-p2", action="store_true",
+                        help="Enrichit et rescore en P2 toutes les lignes Sheets sans Date scoring P2")
+    parser.add_argument("--rescore-min-score", type=int, default=6, metavar="N",
+                        help="Score P1 minimum pour --rescore-p2 (défaut: 6)")
     args = parser.parse_args()
 
     print("=" * 60)
     print("JOB SCANNER — Léonard Maguin")
     print("=" * 60)
+
+    if args.rescore_p2:
+        run_rescore_p2(min_score=args.rescore_min_score, enrich_limit=args.enrich_limit)
+        return
 
     # --- ÉTAPE 1 : Collecte ---
     if args.test_one:

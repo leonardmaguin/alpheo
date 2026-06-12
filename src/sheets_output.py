@@ -159,8 +159,12 @@ def job_to_row(job: dict) -> list:
     effective_score = job.get("score_total", 0)
     accepted = not is_rejected and effective_score >= SHORTLIST_THRESHOLD
 
-    # Résumé P1 : raison rejet si rejeté en P1 (pas de P2), vide sinon
-    resume_p1 = job.get("reject_reason", "") if (is_rejected and not scored_p2) else ""
+    # Résumé P1 : toujours rempli — raison rejet si rejeté, sinon note courte GO
+    score_p1_val = job.get("score_p1", job.get("score_total", 0))
+    if is_rejected:
+        resume_p1 = job.get("reject_reason", "") or "Rejeté"
+    else:
+        resume_p1 = f"GO — Score P1 : {score_p1_val}/10"
 
     # Résumé P2 : analyse complète Claude, uniquement si P2 réalisée
     resume_p2 = job.get("summary", "") if scored_p2 else ""

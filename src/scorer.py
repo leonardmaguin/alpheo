@@ -255,6 +255,9 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
   "recommendation": "GO",
   "dutch_required": "",
   "salary_estimate": "90-110k€ brut/an (estimé d'après le secteur et la séniorité)",
+  "company_size": "~80 personnes",
+  "company_funding": "Série B",
+  "company_description": "2-3 phrases : ce que fait la société, son marché, son produit ou service principal.",
   "strengths": "Point fort 1. Point fort 2. Point fort 3.",
   "red_flags": "Red flag éventuel.",
   "summary": "2-3 phrases concrètes : pourquoi Léonard devrait ou non postuler, ce qui manque pour décider."
@@ -268,7 +271,10 @@ Règles de scoring :
 - score_total : (role×0.5 + company×0.3 + location×0.2), arrondi
 - recommendation : "GO" si score_total >= 6 et hard_reject=false, "NO GO" sinon
 - dutch_required : "mandatory" si le néerlandais est explicitement requis, "preferred" si mentionné comme un atout, "" si pas mentionné
-- salary_estimate : si non mentionné, estime d'après secteur/taille/séniorité/localisation. Format "X-Yk€ brut/an".
+- salary_estimate : si non mentionné, estime d'après secteur/taille/séniorité/localisation. Format "X-Yk€ brut/an"
+- company_size : estime d'après la description (ex: "~50 personnes", "200-500", "1000+"). "" si vraiment impossible à estimer.
+- company_funding : infère depuis la description (ex: "Série A", "Série B", "Bootstrapped", "Corporate / filiale", "Scale-up cotée", "Inconnu")
+- company_description : 2-3 phrases claires sur l'activité, le marché et le produit/service. Priorité à ce qui aide à évaluer la fit culturelle et sectorielle.
 """
 
 
@@ -279,7 +285,7 @@ def score_pass2_single(job: dict, profile: dict, client: anthropic.Anthropic) ->
     try:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1200,
+            max_tokens=1500,
             messages=[{"role": "user", "content": build_pass2_prompt(job, profile)}]
         )
         raw = message.content[0].text.strip()
@@ -299,6 +305,13 @@ def score_pass2_single(job: dict, profile: dict, client: anthropic.Anthropic) ->
         scored.summary = result.get("summary", "")
         scored._extra["recommendation"] = result.get("recommendation", "")
         scored._extra["dutch_required"] = result.get("dutch_required", "")
+        # Taille, funding, description entreprise : Claude écrase l'API si elle répond
+        if result.get("company_size"):
+            scored._extra["company_size"] = result["company_size"]
+        if result.get("company_funding"):
+            scored._extra["company_funding"] = result["company_funding"]
+        if result.get("company_description"):
+            scored._extra["company_description"] = result["company_description"]
 
     except Exception as e:
         print(f"[Scorer/P2] Erreur pour '{job.get('title')}': {e}")
