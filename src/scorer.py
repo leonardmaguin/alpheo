@@ -122,8 +122,8 @@ PASS1_SYSTEM = """Tu es un filtre de recrutement. Évalue chaque offre pour Léo
 PROFIL (résumé) :
 - Senior Ops & Product Builder, 14 ans XP, Bruxelles
 - Cherche UNIQUEMENT en Belgique (max 1h Bruxelles) ou remote/hybride
-- Rôles OK : Head of Ops, COO, GM, Chief of Staff, Head of Product, Head of IT, Director Ops, Country Manager (ops), Data/AI Lead (hands-on), IT PM
-- Rôles KO : dev pur, finance, RH, sales pur, junior
+- Rôles OK : Head of Ops, COO, GM, Chief of Staff, Head of Product, Head of IT, Director Ops, Country Manager (ops), Data/AI Lead (hands-on), IT PM, Head of Customer Success (avec équipe + ownership ops), Head of Account Management (scope stratégique/ops)
+- Rôles KO : dev pur, finance, RH, sales pur, account manager individuel sans équipe, junior
 - Entreprises OK : startup/scale-up tech, SaaS, marketplace, mobilité, énergie, retail tech, IA
 - Entreprises KO : grand corporate, banque, pharma, immobilier
 - Salaire min : 90k€ (rejeter si explicitement <80k€)
@@ -223,7 +223,7 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
 - Localisation : Bruxelles. Cherche en Belgique (max 1h) ou remote/hybride.
 - Rôles idéaux : {strong_roles}
 - Rôles acceptables : {acceptable_roles}
-- Rôles KO : dev pur, finance, RH, sales pur, junior
+- Rôles KO : dev pur, finance, RH, sales pur, account manager individuel sans équipe, junior
 - Entreprises cibles : startups/scale-ups tech 20-300 pers., SaaS, marketplace, e-commerce, mobilité, énergie, retail tech, IA
 - Salaire min : {profile["compensation"]["min_gross_annual_eur"]}€ brut/an
 - Compétences : Agentic AI (Claude/MCP), Ops management, SQL/DBT, process automation, product, ERP
