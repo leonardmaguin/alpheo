@@ -1,0 +1,212 @@
+"""
+Écrit les offres scorées dans un Google Sheets dédié.
+Crée l'onglet s'il n'existe pas, dédoublonne par URL, ajoute en haut.
+"""
+
+import os
+from datetime import datetime, timezone
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
+TOKEN_PATH = "token.json"
+CREDENTIALS_PATH = "credentials.json"
+
+SHEET_NAME = "Job Scanner"
+TAB_NAME = "Offres"
+
+COLUMNS = [
+    "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
+    "Date ajout",
+    "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
+    "Score P2 /10",         # score final (passe 2 si enrichi, sinon passe 1)
+    "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
+    "Score Rôle",
+    "Score Entreprise",
+    "Score Localisation",
+    "Titre",
+    "Entreprise",
+    "Localisation",
+    "Salaire affiché",
+    "Salaire estimé",       # estimé par Claude en passe 2
+    "Résumé / Raison rejet",
+    "Points forts",
+    "Red flags",
+    "Taille entreprise",
+    "Secteur",
+    "Séniorité",
+    "Funding / Type",
+    "Description entreprise",
+    "Description offre",    # description complète récupérée via API
+    "URL",
+    "Source",
+    "Statut",               # à remplir manuellement : Postulé / Pas intéressé / En cours
+]
+
+
+def get_sheets_service():
+    creds = None
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(TOKEN_PATH, "w") as token:
+            token.write(creds.to_json())
+    return build("sheets", "v4", credentials=creds)
+
+
+def get_or_create_spreadsheet(service, spreadsheet_id: str = "") -> str:
+    """Retourne l'ID du spreadsheet (crée si non fourni)."""
+    if spreadsheet_id:
+        return spreadsheet_id
+
+    spreadsheet = service.spreadsheets().create(body={
+        "properties": {"title": SHEET_NAME},
+        "sheets": [{"properties": {"title": TAB_NAME}}],
+    }).execute()
+
+    sheet_id = spreadsheet["spreadsheetId"]
+    print(f"[Sheets] Spreadsheet créé : https://docs.google.com/spreadsheets/d/{sheet_id}")
+    return sheet_id
+
+
+def ensure_header(service, spreadsheet_id: str):
+    """Crée l'en-tête si la feuille est vide."""
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{TAB_NAME}!A1:A1"
+    ).execute()
+
+    if not result.get("values"):
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"{TAB_NAME}!A1",
+            valueInputOption="RAW",
+            body={"values": [COLUMNS]},
+        ).execute()
+
+        # Mise en forme : header en gras, fond bleu foncé
+        sheet_meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        sheet_id_int = next(
+            s["properties"]["sheetId"]
+            for s in sheet_meta["sheets"]
+            if s["properties"]["title"] == TAB_NAME
+        )
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id_int, "startRowIndex": 0, "endRowIndex": 1},
+                    "cell": {"userEnteredFormat": {
+                        "backgroundColor": {"red": 0.13, "green": 0.27, "blue": 0.53},
+                        "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+                    }},
+                    "fields": "userEnteredFormat(backgroundColor,textFormat)",
+                }
+            }]}
+        ).execute()
+
+
+def get_existing_urls(service, spreadsheet_id: str) -> set:
+    """Récupère les URLs déjà présentes pour éviter les doublons."""
+    url_col_index = COLUMNS.index("URL")
+    col_letter = chr(ord("A") + url_col_index)
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{TAB_NAME}!{col_letter}2:{col_letter}10000"
+    ).execute()
+
+    values = result.get("values", [])
+    return {row[0] for row in values if row}
+
+
+SHORTLIST_THRESHOLD = 6
+
+
+def job_to_row(job: dict) -> list:
+    """Convertit un job dict en ligne Google Sheets."""
+    is_rejected = job.get("hard_reject", False)
+    score_p2 = job.get("score_total", 0)
+    score_p1 = job.get("score_p1", score_p2)  # fallback sur score_total si pas de P1 séparé
+    accepted = not is_rejected and score_p2 >= SHORTLIST_THRESHOLD
+    summary = job.get("reject_reason", "") if is_rejected else job.get("summary", "")
+
+    # Salaire : affiché si présent dans l'offre, estimé par Claude sinon
+    salary_displayed = job.get("salary", "")
+    salary_estimate = job.get("salary_estimate", "")
+
+    description = job.get("description", "")
+    company_description = job.get("company_description", "")
+
+    return [
+        job.get("email_date", ""),
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+        "TRUE" if accepted else "FALSE",
+        score_p2,
+        score_p1,
+        job.get("score_role", 0),
+        job.get("score_company", 0),
+        job.get("score_location", 0),
+        job.get("title", ""),
+        job.get("company", ""),
+        job.get("location", ""),
+        salary_displayed,
+        salary_estimate,
+        summary[:500] if summary else "",
+        job.get("strengths", ""),
+        job.get("red_flags", ""),
+        job.get("company_size", ""),
+        job.get("company_industry", ""),
+        job.get("seniority_level", ""),
+        job.get("company_funding", ""),
+        company_description[:800] if company_description else "",
+        description[:2000] if description else "",
+        job.get("url", ""),
+        job.get("source", ""),
+        "",  # Statut — à remplir manuellement
+    ]
+
+
+def write_jobs_to_sheets(jobs: list[dict], spreadsheet_id: str = "") -> str:
+    """
+    Écrit les offres dans Google Sheets.
+    Retourne l'URL du spreadsheet.
+    """
+    service = get_sheets_service()
+    spreadsheet_id = get_or_create_spreadsheet(service, spreadsheet_id)
+    ensure_header(service, spreadsheet_id)
+    existing_urls = get_existing_urls(service, spreadsheet_id)
+
+    new_jobs = [j for j in jobs if j.get("url") not in existing_urls]
+    if not new_jobs:
+        print("[Sheets] Aucune nouvelle offre à ajouter (toutes déjà présentes)")
+        return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+
+    # Tri par score décroissant
+    new_jobs.sort(key=lambda x: x.get("score_total", 0), reverse=True)
+    rows = [job_to_row(j) for j in new_jobs]
+
+    # Insère après le header (ligne 2) pour avoir les nouvelles offres en haut
+    service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"{TAB_NAME}!A2",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": rows},
+    ).execute()
+
+    print(f"[Sheets] {len(new_jobs)} nouvelle(s) offre(s) ajoutée(s)")
+    url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+    print(f"[Sheets] {url}")
+    return url
