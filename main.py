@@ -13,6 +13,7 @@ import os
 import sys
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -165,9 +166,17 @@ def main():
     if has_description:
         print(f"\n[3b/4] Scoring passe 2 ({len(has_description)} offres avec description)...")
         rescored = score_all_jobs(has_description, verbose=True, pass2=True)
-        final_scored.extend([j.to_dict() for j in rescored])
-    # Offres sans description : conserve le score passe 1
-    final_scored.extend(no_description)
+        p2_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        for j in rescored:
+            d = j.to_dict()
+            d["scored_p2"] = True
+            d["date_scoring_p2"] = p2_date
+            final_scored.append(d)
+    # Offres sans description : conserve le score passe 1, pas de P2
+    for j in no_description:
+        j["scored_p2"] = False
+        j["date_scoring_p2"] = ""
+        final_scored.append(j)
 
     # Rassemble tout pour le Sheets
     # Pour les offres non enrichies, score_p1 = score_total (passe 1 est le score final)

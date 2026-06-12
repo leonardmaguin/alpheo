@@ -25,7 +25,8 @@ COLUMNS = [
     "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
     "Date ajout",
     "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
-    "Score P2 /10",         # score final (passe 2 si enrichi, sinon passe 1)
+    "Score P2 /10",         # score passe 2 (vide si P2 non réalisée)
+    "Date scoring P2",      # date de la passe 2 (vide si non réalisée)
     "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
     "Score Rôle",
     "Score Entreprise",
@@ -137,15 +138,18 @@ SHORTLIST_THRESHOLD = 6
 def job_to_row(job: dict) -> list:
     """Convertit un job dict en ligne Google Sheets."""
     is_rejected = job.get("hard_reject", False)
-    score_p2 = job.get("score_total", 0)
-    score_p1 = job.get("score_p1", score_p2)  # fallback sur score_total si pas de P1 séparé
-    accepted = not is_rejected and score_p2 >= SHORTLIST_THRESHOLD
-    summary = job.get("reject_reason", "") if is_rejected else job.get("summary", "")
+    scored_p2 = job.get("scored_p2", False)  # True uniquement si la passe 2 a été exécutée
+    score_p2 = job.get("score_total", 0) if scored_p2 else ""
+    date_p2 = job.get("date_scoring_p2", "") if scored_p2 else ""
+    score_p1 = job.get("score_p1", job.get("score_total", 0))
 
-    # Salaire : affiché si présent dans l'offre, estimé par Claude sinon
+    # Pour Accepté : utilise score_p2 si disponible, sinon score_p1
+    effective_score = job.get("score_total", 0)
+    accepted = not is_rejected and effective_score >= SHORTLIST_THRESHOLD
+
+    summary = job.get("reject_reason", "") if is_rejected else job.get("summary", "")
     salary_displayed = job.get("salary", "")
     salary_estimate = job.get("salary_estimate", "")
-
     description = job.get("description", "")
     company_description = job.get("company_description", "")
 
@@ -153,7 +157,8 @@ def job_to_row(job: dict) -> list:
         job.get("email_date", ""),
         datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
         "TRUE" if accepted else "FALSE",
-        score_p2,
+        score_p2,           # vide si pas de P2
+        date_p2,            # vide si pas de P2
         score_p1,
         job.get("score_role", 0),
         job.get("score_company", 0),
