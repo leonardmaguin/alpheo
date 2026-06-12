@@ -317,6 +317,7 @@ def score_pass2_single(job: dict, profile: dict, client: anthropic.Anthropic) ->
         print(f"[Scorer/P2] Erreur pour '{job.get('title')}': {e}")
         scored.score_total = job.get("score_total", 0)  # conserve le score P1
         scored.reject_reason = f"Erreur scoring P2: {e}"
+        scored._extra["p2_failed"] = True  # signal : ne pas écrire cette ligne comme scorée P2
 
     return scored
 

@@ -173,6 +173,9 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False
         if not row_num:
             print(f"[Rescore P2] URL introuvable dans le Sheets : {url}")
             continue
+        if d.get("p2_failed"):
+            print(f"[Rescore P2] Ligne {row_num} ignorée (erreur P2) — {d['title']} @ {d['company']}")
+            continue
         col_start, col_end, p2_values = job_to_p2_cells(d)
         service.spreadsheets().values().update(
             spreadsheetId=sid,
@@ -299,8 +302,13 @@ def main():
         p2_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         for j in rescored:
             d = j.to_dict()
-            d["scored_p2"] = True
-            d["date_scoring_p2"] = p2_date
+            if d.get("p2_failed"):
+                # Erreur Claude (ex: rate limit) — traiter comme sans P2
+                d["scored_p2"] = False
+                d["date_scoring_p2"] = ""
+            else:
+                d["scored_p2"] = True
+                d["date_scoring_p2"] = p2_date
             final_scored.append(d)
     # Offres sans description : conserve le score passe 1, pas de P2
     for j in no_description:
