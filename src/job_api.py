@@ -186,7 +186,7 @@ def enrich_jobs_with_api(
         print(f"[Job API] Cache : {cache_hits} offre(s) déjà enrichie(s), skip API")
 
     api_call_count = 0
-    jobs_to_enrich = jobs[:max_jobs] if max_jobs is not None else jobs
+    jobs_to_enrich = jobs  # tous les jobs passent par la boucle ; max_jobs limite seulement les appels API réels
 
     for job in jobs_to_enrich:
         url = job.get("url", "")
