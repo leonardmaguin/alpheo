@@ -1,8 +1,8 @@
 """
-Enrichissement des offres via une API jobs externe (provider configurable).
-Gère un cache Google Sheets pour éviter de re-requêter les offres déjà enrichies.
+Enrichissement des offres via Jobs API (by Patrick) — rapidapi.com
+Endpoint utilisé : /v2/linkedin/get?id=JOB_ID (1 appel par offre, ID extrait de l'URL LinkedIn)
+Cache Google Sheets (onglet "Cache API") pour éviter les re-requêtes.
 
-Provider actif : Jobs API (by Patrick) — rapidapi.com
 Pour revenir à Fantastic.Jobs, voir src/_fantastic_jobs_api.py
 """
 
@@ -11,6 +11,9 @@ import re
 import json
 import time
 import requests
+
+JOBS_API_HOST = "jobs-api14.p.rapidapi.com"
+JOBS_API_BASE = "https://jobs-api14.p.rapidapi.com"
 
 # ---------------------------------------------------------------------------
 # Cache Sheets — onglet "Cache API"
@@ -84,51 +87,75 @@ def save_to_cache(sheets_service, spreadsheet_id: str, linkedin_url: str, enrich
 
 
 # ---------------------------------------------------------------------------
-# Provider : Jobs API (by Patrick) — à remplacer dès réception de la doc
-# Placeholder : toutes les fonctions sont définies mais retournent vide
+# Provider : Jobs API (by Patrick) — /v2/linkedin/get
 # ---------------------------------------------------------------------------
 
-def _extract_fields_jobs_api(job: dict) -> dict:
-    """
-    Extrait les champs utiles depuis un objet job de l'API Jobs API (Patrick).
-    À adapter selon la doc exacte de l'API.
-    """
-    description = (
-        job.get("description", "")
-        or job.get("job_description", "")
-        or job.get("jobDescription", "")
-        or ""
-    )
-    salary = (
-        job.get("salary", "")
-        or job.get("salary_range", "")
-        or job.get("compensation", "")
-        or ""
-    )
-    company_size = str(job.get("company_size", "") or job.get("companySize", "") or "")
-    company_industry = str(job.get("industry", "") or job.get("company_industry", "") or "")
-    seniority_level = str(job.get("seniority_level", "") or job.get("experience_level", "") or "")
-    company_description = str(job.get("company_description", "") or job.get("companyDescription", "") or "")
-    company_funding = str(job.get("company_type", "") or job.get("funding", "") or "")
+def _extract_fields(job: dict) -> dict:
+    """Extrait les champs utiles depuis un objet job /v2/linkedin/get."""
+    description = job.get("description", "") or ""
+
+    # Séniorité
+    seniority_level = job.get("seniorityLevel", "") or ""
+
+    # Secteur
+    company_industry = job.get("industries", "") or ""
+
+    # Salaire : non fourni par cet endpoint, sera estimé par Claude en P2
+    salary = ""
 
     return {
         "description": description,
         "salary": salary,
-        "company_size": company_size,
-        "company_industry": company_industry,
-        "seniority_level": seniority_level,
-        "company_description": company_description,
-        "company_funding": company_funding,
+        "company_size": "",          # pas fourni par /v2/linkedin/get
+        "company_industry": str(company_industry),
+        "seniority_level": str(seniority_level),
+        "company_description": "",   # pas fourni par /v2/linkedin/get
+        "company_funding": "",
     }
 
 
 def fetch_job_details(linkedin_url: str) -> dict:
     """
-    Récupère les détails d'une offre LinkedIn via Jobs API.
-    À implémenter une fois la doc reçue.
+    Récupère les détails d'une offre via /v2/linkedin/get?id=JOB_ID.
+    L'ID est extrait directement de l'URL LinkedIn (format /jobs/view/ID/).
+    Coûte 1 crédit API.
     """
-    # TODO: implémenter avec la doc Jobs API
-    return {}
+    api_key = os.environ.get("RAPIDAPI_KEY", "")
+    if not api_key:
+        return {}
+
+    match = re.search(r"/jobs/view/(\d+)", linkedin_url)
+    if not match:
+        return {}
+    job_id = match.group(1)
+
+    try:
+        response = requests.get(
+            f"{JOBS_API_BASE}/v2/linkedin/get",
+            headers={
+                "x-rapidapi-host": JOBS_API_HOST,
+                "x-rapidapi-key": api_key,
+            },
+            params={"id": job_id},
+            timeout=20,
+        )
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("hasError") or not data.get("data"):
+            return {}
+
+        return _extract_fields(data["data"])
+
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response else "?"
+        print(f"[Job API] HTTP {status} pour job_id={job_id}: {e}")
+        return {}
+    except Exception as e:
+        print(f"[Job API] Erreur pour job_id={job_id}: {e}")
+        return {}
 
 
 # ---------------------------------------------------------------------------
