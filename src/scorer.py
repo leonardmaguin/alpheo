@@ -172,8 +172,8 @@ def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str
     )
     user_msg = f"Évalue ces {len(to_score)} offres :\n{lines}"
 
-    # Découpe en batches de 30 pour rester dans les limites de tokens
-    batch_size = 30
+    # Découpe en batches de 50 — moins d'appels API, moins de risque de rate limit
+    batch_size = 50
     all_jobs_lines = [
         f'{j["id"]} | {j.get("title","")} | {j.get("company","")} | {j.get("location","")} | {j.get("salary","")}'
         for j in to_score
@@ -183,6 +183,9 @@ def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str
         batch_lines = all_jobs_lines[i:i + batch_size]
         batch_jobs = to_score[i:i + batch_size]
         user_msg = f"Évalue ces {len(batch_lines)} offres :\n" + "\n".join(batch_lines)
+        if i > 0:
+            import time as _time
+            _time.sleep(3)
 
         try:
             message = client.messages.create(
