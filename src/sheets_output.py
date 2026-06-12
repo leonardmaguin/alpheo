@@ -147,6 +147,9 @@ def get_existing_urls(service, spreadsheet_id: str) -> set:
 
 SHORTLIST_THRESHOLD = 6
 
+# Première colonne modifiée par la P2 (les colonnes avant sont figées après la P1)
+P2_START_COL = "Accepté"
+
 
 def job_to_row(job: dict) -> list:
     """Convertit un job dict en ligne Google Sheets."""
@@ -206,6 +209,19 @@ def job_to_row(job: dict) -> list:
         job.get("source", ""),
         "",  # Statut — à remplir manuellement
     ]
+
+
+def job_to_p2_cells(job: dict) -> tuple[str, str, list]:
+    """
+    Retourne (col_start, col_end, values) pour mettre à jour uniquement les colonnes P2.
+    Les colonnes P1 (Date offre, Date ajout, Score P1, Résumé P1) ne sont pas touchées.
+    """
+    full_row = job_to_row(job)
+    p2_start_idx = COLUMNS.index(P2_START_COL)
+    p2_values = full_row[p2_start_idx:]
+    col_start = _col_letter(p2_start_idx)
+    col_end = _col_letter(len(COLUMNS) - 1)
+    return col_start, col_end, p2_values
 
 
 def write_jobs_to_sheets(jobs: list[dict], spreadsheet_id: str = "") -> str:
