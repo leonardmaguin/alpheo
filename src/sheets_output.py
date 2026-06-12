@@ -121,14 +121,24 @@ def ensure_header(service, spreadsheet_id: str):
         ).execute()
 
 
+def _col_letter(index: int) -> str:
+    """Convertit un index 0-based en lettre(s) de colonne Sheets (A, B, ..., Z, AA, AB...)."""
+    result = ""
+    n = index + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
 def get_existing_urls(service, spreadsheet_id: str) -> set:
     """Récupère les URLs déjà présentes pour éviter les doublons."""
     url_col_index = COLUMNS.index("URL")
-    col_letter = chr(ord("A") + url_col_index)
+    col = _col_letter(url_col_index)
 
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"{TAB_NAME}!{col_letter}2:{col_letter}10000"
+        range=f"{TAB_NAME}!{col}2:{col}10000"
     ).execute()
 
     values = result.get("values", [])
