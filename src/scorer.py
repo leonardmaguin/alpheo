@@ -140,8 +140,9 @@ RÈGLES KO DUR (go=false, score=0) :
 - Rôle dev pur / finance / RH / sales pur
 - Salaire explicitement <80k€
 
-Réponds UNIQUEMENT avec un array JSON, une ligne par offre, AUCUN texte autour :
-[{"id":"...","score":7,"go":true},{"id":"...","score":2,"go":false},...]"""
+Réponds UNIQUEMENT avec un array JSON, une ligne par offre, AUCUN texte autour.
+Pour les go=false, ajoute un champ "reason" (5-8 mots max, cause principale) :
+[{"id":"...","score":7,"go":true},{"id":"...","score":2,"go":false,"reason":"Rôle dev pur, hors profil"},...]"""
 
 
 def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str, dict]:
@@ -186,14 +187,18 @@ def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str
         try:
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=len(batch_lines) * 30 + 50,  # ~30 tokens par offre
+                max_tokens=len(batch_lines) * 40 + 50,  # ~40 tokens par offre (inclut reason)
                 system=PASS1_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}]
             )
             raw = message.content[0].text.strip()
             parsed = _parse_json_array(raw)
             for item in parsed:
-                results[item["id"]] = {"score": item.get("score", 0), "go": item.get("go", False)}
+                results[item["id"]] = {
+                    "score": item.get("score", 0),
+                    "go": item.get("go", False),
+                    "reason": item.get("reason", ""),
+                }
         except Exception as e:
             print(f"[Scorer/P1] Erreur batch ({i}-{i+batch_size}): {e}")
             # En cas d'erreur, marque toutes les offres du batch comme GO avec score 5
@@ -314,7 +319,11 @@ def score_pass1(jobs: list[dict], verbose: bool = True) -> list[ScoredJob]:
         r = results.get(job["id"], {"score": 0, "go": False})
         scored.score_total = r.get("score", 0)
         scored.hard_reject = not r.get("go", False)
-        scored.reject_reason = r.get("reject_reason", "Score P1 trop bas" if scored.hard_reject else "")
+        if scored.hard_reject:
+            # Préfère la raison du pré-filtre localisation (déjà dans r), sinon celle de Claude
+            scored.reject_reason = r.get("reject_reason") or r.get("reason") or "Score P1 trop bas"
+        else:
+            scored.reject_reason = ""
         scored_list.append(scored)
 
         if verbose:

@@ -160,9 +160,9 @@ def job_to_row(job: dict) -> list:
         "TRUE" if accepted else "FALSE",
         date_p2,            # vide si pas de P2
         score_p2,           # vide si pas de P2
-        job.get("score_role", 0),
-        job.get("score_company", 0),
-        job.get("score_location", 0),
+        job.get("score_role", "") if scored_p2 else "",
+        job.get("score_company", "") if scored_p2 else "",
+        job.get("score_location", "") if scored_p2 else "",
         job.get("title", ""),
         job.get("company", ""),
         job.get("location", ""),
