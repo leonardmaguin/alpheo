@@ -67,15 +67,17 @@ def run_test_mode():
     ]
 
 
-def run_rescore_p2(min_score: int, enrich_limit: int = None):
+def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False):
     """
     Récupère depuis le Sheets toutes les lignes sans Date scoring P2 et Score P1 >= min_score,
     les enrichit via l'API si nécessaire, les rescore en P2, et met à jour les lignes en place.
+    Si force=True, rescore même les lignes qui ont déjà une P2.
     """
     service = get_sheets_service()
     sid = get_or_create_spreadsheet(service, SPREADSHEET_ID)
 
-    print(f"\n[Rescore P2] Lecture du Sheets (Score P1 >= {min_score}, sans P2)...")
+    label = "avec ou sans P2" if force else "sans P2"
+    print(f"\n[Rescore P2] Lecture du Sheets (Score P1 >= {min_score}, {label})...")
     result = service.spreadsheets().values().get(
         spreadsheetId=sid, range=f"{TAB_NAME}!A2:AC5000"
     ).execute()
@@ -98,7 +100,9 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None):
     for i, row in enumerate(rows):
         score_p1_raw = get_score_p1(row)
         date_p2 = get_date_p2(row)
-        if not score_p1_raw or date_p2:
+        if not score_p1_raw:
+            continue
+        if date_p2 and not force:
             continue
         try:
             score_p1 = int(score_p1_raw)
@@ -202,6 +206,8 @@ def main():
                         help="Enrichit et rescore en P2 toutes les lignes Sheets sans Date scoring P2")
     parser.add_argument("--rescore-min-score", type=int, default=6, metavar="N",
                         help="Score P1 minimum pour --rescore-p2 (défaut: 6)")
+    parser.add_argument("--rescore-force", action="store_true",
+                        help="Rescore même les lignes qui ont déjà une P2")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -209,7 +215,7 @@ def main():
     print("=" * 60)
 
     if args.rescore_p2:
-        run_rescore_p2(min_score=args.rescore_min_score, enrich_limit=args.enrich_limit)
+        run_rescore_p2(min_score=args.rescore_min_score, enrich_limit=args.enrich_limit, force=args.rescore_force)
         return
 
     # --- ÉTAPE 1 : Collecte ---

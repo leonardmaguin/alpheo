@@ -241,7 +241,7 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
 - Taille entreprise : {job.get("company_size") or "Inconnue"}
 - Séniorité : {job.get("seniority_level") or "Non précisée"}
 - Description :
-{job.get("description", "")[:3000]}
+{job.get("description", "")}
 
 ## INSTRUCTIONS — réponds UNIQUEMENT en JSON valide :
 
