@@ -47,6 +47,7 @@ COLUMNS = [
     "Funding / Type",
     "Description entreprise",
     "Description offre",    # description complète récupérée via API
+    "Dutch Required?",      # mandatory / preferred / vide si non mentionné (P2)
     "URL",
     "Source",
     "Statut",               # à remplir manuellement : Postulé / Pas intéressé / En cours
@@ -186,6 +187,7 @@ def job_to_row(job: dict) -> list:
         job.get("company_funding", ""),
         job.get("company_description", ""),
         job.get("description", ""),
+        job.get("dutch_required", "") if scored_p2 else "",
         job.get("url", ""),
         job.get("source", ""),
         "",  # Statut — à remplir manuellement

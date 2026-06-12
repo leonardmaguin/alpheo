@@ -75,7 +75,7 @@ class ScoredJob:
                 "company_size", "company_industry", "seniority_level",
                 "company_funding", "company_description",
                 "score_p1", "scored_p2", "date_scoring_p2",
-                "api_enriched", "from_cache", "recommendation",
+                "api_enriched", "from_cache", "recommendation", "dutch_required",
             ) if k in job
         }
         return obj
@@ -250,6 +250,7 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
   "score_location": 8,
   "score_total": 7,
   "recommendation": "GO",
+  "dutch_required": "",
   "salary_estimate": "90-110k€ brut/an (estimé d'après le secteur et la séniorité)",
   "strengths": "Point fort 1. Point fort 2. Point fort 3.",
   "red_flags": "Red flag éventuel.",
@@ -263,6 +264,7 @@ Règles de scoring :
 - score_location : 10=Bruxelles/hybride, 7=Belgique <1h, 5=remote, 0=hors Belgique sans remote
 - score_total : (role×0.5 + company×0.3 + location×0.2), arrondi
 - recommendation : "GO" si score_total >= 6 et hard_reject=false, "NO GO" sinon
+- dutch_required : "mandatory" si le néerlandais est explicitement requis, "preferred" si mentionné comme un atout, "" si pas mentionné
 - salary_estimate : si non mentionné, estime d'après secteur/taille/séniorité/localisation. Format "X-Yk€ brut/an".
 """
 
@@ -293,6 +295,7 @@ def score_pass2_single(job: dict, profile: dict, client: anthropic.Anthropic) ->
         scored.red_flags = result.get("red_flags", "")
         scored.summary = result.get("summary", "")
         scored._extra["recommendation"] = result.get("recommendation", "")
+        scored._extra["dutch_required"] = result.get("dutch_required", "")
 
     except Exception as e:
         print(f"[Scorer/P2] Erreur pour '{job.get('title')}': {e}")
