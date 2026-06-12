@@ -24,10 +24,10 @@ TAB_NAME = "Offres"
 COLUMNS = [
     "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
     "Date ajout",
-    "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
-    "Score P2 /10",         # score passe 2 (vide si P2 non réalisée)
-    "Date scoring P2",      # date de la passe 2 (vide si non réalisée)
     "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
+    "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
+    "Date scoring P2",      # date de la passe 2 (vide si non réalisée)
+    "Score P2 /10",         # score passe 2 (vide si P2 non réalisée)
     "Score Rôle",
     "Score Entreprise",
     "Score Localisation",
@@ -156,10 +156,10 @@ def job_to_row(job: dict) -> list:
     return [
         job.get("email_date", ""),
         datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
-        "TRUE" if accepted else "FALSE",
-        score_p2,           # vide si pas de P2
-        date_p2,            # vide si pas de P2
         score_p1,
+        "TRUE" if accepted else "FALSE",
+        date_p2,            # vide si pas de P2
+        score_p2,           # vide si pas de P2
         job.get("score_role", 0),
         job.get("score_company", 0),
         job.get("score_location", 0),
