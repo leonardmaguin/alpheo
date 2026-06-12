@@ -20,7 +20,7 @@ JOBS_API_BASE = "https://jobs-api14.p.rapidapi.com"
 # ---------------------------------------------------------------------------
 
 CACHE_TAB = "Cache API"
-CACHE_COLUMNS = ["linkedin_url", "api_raw_json", "enriched_at"]
+CACHE_COLUMNS = ["enriched_at", "linkedin_url", "api_raw_json"]
 
 
 def get_api_cache(sheets_service, spreadsheet_id: str) -> dict[str, dict]:
@@ -57,9 +57,9 @@ def get_api_cache(sheets_service, spreadsheet_id: str) -> dict[str, dict]:
         rows = result.get("values", [])
         cache = {}
         for row in rows:
-            if len(row) >= 2 and row[0] and row[1]:
+            if len(row) >= 3 and row[1] and row[2]:
                 try:
-                    cache[row[0]] = json.loads(row[1])
+                    cache[row[1]] = json.loads(row[2])  # row[0]=enriched_at, row[1]=url, row[2]=json
                 except Exception:
                     pass
         return cache
@@ -74,7 +74,7 @@ def save_to_cache(sheets_service, spreadsheet_id: str, linkedin_url: str, enrich
         return
     try:
         from datetime import datetime, timezone
-        row = [linkedin_url, json.dumps(enriched, ensure_ascii=False), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")]
+        row = [datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"), linkedin_url, json.dumps(enriched, ensure_ascii=False)]
         sheets_service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id,
             range=f"{CACHE_TAB}!A2",
