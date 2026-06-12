@@ -57,7 +57,7 @@ class ScoredJob:
 
     @classmethod
     def from_job_dict(cls, job: dict) -> "ScoredJob":
-        return cls(
+        obj = cls(
             id=job.get("id", ""),
             title=job.get("title", ""),
             company=job.get("company", ""),
@@ -69,6 +69,22 @@ class ScoredJob:
             collected_at=job.get("collected_at", ""),
             email_date=job.get("email_date", ""),
         )
+        # Préserve les champs d'enrichissement API non déclarés dans le dataclass
+        obj._extra = {
+            k: job[k] for k in (
+                "company_size", "company_industry", "seniority_level",
+                "company_funding", "company_description",
+                "score_p1", "scored_p2", "date_scoring_p2",
+                "api_enriched", "from_cache",
+            ) if k in job
+        }
+        return obj
+
+    def to_dict(self) -> dict:
+        d = self.__dict__.copy()
+        extra = d.pop("_extra", {})
+        d.update(extra)
+        return d
 
 
 # ---------------------------------------------------------------------------
