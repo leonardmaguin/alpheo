@@ -92,7 +92,7 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False
         return lambda row: row[idx] if idx < len(row) else ""
 
     get_score_p1   = col("Score P1 /10")
-    get_date_p2    = col("Date scoring P2")
+    get_date_p2    = col("Date P2")
     get_url        = col("URL")
     get_title      = col("Titre")
     get_company    = col("Entreprise")
