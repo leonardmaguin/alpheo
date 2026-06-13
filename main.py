@@ -67,16 +67,20 @@ def run_test_mode():
     ]
 
 
-def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False):
+def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False, only_id: str = ""):
     """
-    Récupère depuis le Sheets toutes les lignes sans Date scoring P2 et Score P1 >= min_score,
-    les enrichit via l'API si nécessaire, les rescore en P2, et met à jour les lignes en place.
-    Si force=True, rescore même les lignes qui ont déjà une P2.
+    Récupère depuis le Sheets les lignes éligibles, les enrichit et les rescore en P2.
+    only_id : si fourni, cible uniquement la ligne avec cet ID LinkedIn (implique force=True).
     """
     service = get_sheets_service()
     sid = get_or_create_spreadsheet(service, SPREADSHEET_ID)
 
-    label = "avec ou sans P2" if force else "sans P2"
+    if only_id:
+        label = f"ID LinkedIn = {only_id}"
+    elif force:
+        label = "avec ou sans P2"
+    else:
+        label = "sans P2"
     print(f"\n[Rescore P2] Lecture du Sheets (Score P1 >= {min_score}, {label})...")
     result = service.spreadsheets().values().get(
         spreadsheetId=sid, range=f"{TAB_NAME}!A2:AC5000"
@@ -96,25 +100,37 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False
     get_salary     = col("Salaire affiché")
     get_email_date = col("Date offre")
 
+    from sheets_output import _linkedin_id
+
     to_rescore = []
     for i, row in enumerate(rows):
         score_p1_raw = get_score_p1(row)
         date_p2 = get_date_p2(row)
-        if not score_p1_raw:
-            continue
-        if date_p2 and not force:
-            continue
+        url = get_url(row)
+
+        if only_id:
+            if _linkedin_id(url) != only_id:
+                continue
+        else:
+            if not score_p1_raw:
+                continue
+            if date_p2 and not force:
+                continue
+            try:
+                score_p1 = int(score_p1_raw)
+            except ValueError:
+                continue
+            if score_p1 < min_score:
+                continue
         try:
-            score_p1 = int(score_p1_raw)
+            score_p1 = int(score_p1_raw) if score_p1_raw else 0
         except ValueError:
-            continue
-        if score_p1 < min_score:
-            continue
+            score_p1 = 0
         to_rescore.append({
             "sheet_row": i + 2,  # 1-indexed, +1 pour header
             "id": f"rescore_{i}",
             "score_p1": score_p1,
-            "url": get_url(row),
+            "url": url,
             "title": get_title(row),
             "company": get_company(row),
             "location": get_location(row),
@@ -209,14 +225,21 @@ def main():
                         help="Score P1 minimum pour --rescore-p2 (défaut: 6)")
     parser.add_argument("--rescore-force", action="store_true",
                         help="Rescore même les lignes qui ont déjà une P2")
+    parser.add_argument("--rescore-id", type=str, default="", metavar="LINKEDIN_ID",
+                        help="Rescore uniquement l'offre avec cet ID LinkedIn (implique --rescore-force)")
     args = parser.parse_args()
 
     print("=" * 60)
     print("JOB SCANNER — Léonard Maguin")
     print("=" * 60)
 
-    if args.rescore_p2:
-        run_rescore_p2(min_score=args.rescore_min_score, enrich_limit=args.enrich_limit, force=args.rescore_force)
+    if args.rescore_p2 or args.rescore_id:
+        run_rescore_p2(
+            min_score=args.rescore_min_score,
+            enrich_limit=args.enrich_limit,
+            force=args.rescore_force or bool(args.rescore_id),
+            only_id=args.rescore_id,
+        )
         return
 
     # --- ÉTAPE 1 : Collecte ---

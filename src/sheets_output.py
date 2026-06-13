@@ -48,6 +48,7 @@ COLUMNS = [
     "Description entreprise",
     "Description offre",    # description complète récupérée via API
     "Dutch Required?",      # mandatory / preferred / vide si non mentionné (P2)
+    "ID LinkedIn",          # identifiant numérique extrait de l'URL LinkedIn
     "URL",
     "Source",
     "Statut",               # à remplir manuellement : Postulé / Pas intéressé / En cours
@@ -150,6 +151,12 @@ SHORTLIST_THRESHOLD = 6
 # Première colonne modifiée par la P2 (les colonnes avant sont figées après la P1)
 P2_START_COL = "Accepté"
 
+import re as _re
+
+def _linkedin_id(url: str) -> str:
+    m = _re.search(r"/jobs/view/(\d+)", url)
+    return m.group(1) if m else ""
+
 
 def job_to_row(job: dict) -> list:
     """Convertit un job dict en ligne Google Sheets."""
@@ -205,6 +212,7 @@ def job_to_row(job: dict) -> list:
         job.get("company_description", ""),
         job.get("description", ""),
         job.get("dutch_required", "") if scored_p2 else "",
+        _linkedin_id(job.get("url", "")),
         job.get("url", ""),
         job.get("source", ""),
         "",  # Statut — à remplir manuellement
