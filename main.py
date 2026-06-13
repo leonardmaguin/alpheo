@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
-from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_cells, _col_letter
+from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_updates, _col_letter
 
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
@@ -192,12 +192,10 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False
         if d.get("p2_failed"):
             print(f"[Rescore P2] Ligne {row_num} ignorée (erreur P2) — {d['title']} @ {d['company']}")
             continue
-        col_start, col_end, p2_values = job_to_p2_cells(d)
-        service.spreadsheets().values().update(
+        updates = job_to_p2_updates(d, row_num)
+        service.spreadsheets().values().batchUpdate(
             spreadsheetId=sid,
-            range=f"{TAB_NAME}!{col_start}{row_num}:{col_end}{row_num}",
-            valueInputOption="USER_ENTERED",
-            body={"values": [p2_values]},
+            body={"valueInputOption": "USER_ENTERED", "data": updates},
         ).execute()
         reco = d.get("recommendation", "")
         print(f"[Rescore P2] Ligne {row_num} mise à jour — {d['title']} @ {d['company']} → {d.get('score_total','?')}/10 {reco}")

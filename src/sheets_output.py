@@ -22,22 +22,31 @@ SHEET_NAME = "Job Scanner"
 TAB_NAME = "Offres"
 
 COLUMNS = [
+    "Date ajout (P1)",      # date d'ajout dans le Sheets (P1)
+    "ID LinkedIn",          # identifiant numérique extrait de l'URL LinkedIn
     "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
-    "Date ajout",
     "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
-    "Résumé P1",            # raison rejet P1 ou vide si GO
+    "Résumé P1",            # raison rejet P1 ou note GO
     "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
-    "Date scoring P2",      # date de la passe 2 (vide si non réalisée)
+    "Date P2",              # date de la passe 2 (vide si non réalisée)
     "Score P2 /10",         # score passe 2 (vide si P2 non réalisée)
-    "Recommandation P2",    # GO ou NO GO selon Claude en P2 (vide si P2 non réalisée)
-    "Score Rôle",
-    "Score Entreprise",
-    "Score Localisation",
+    "Reco P2",              # GO ou NO GO selon Claude en P2
+    "Rôle",                 # score rôle (P2)
+    "Score Entreprise",     # score entreprise (P2)
+    "Lieu",                 # score localisation (P2)
+    "Score Léo",            # score manuel de Léonard (à remplir)
+    "Reco Léo",             # recommandation manuelle de Léonard
+    "Motif Léo",            # motif manuel de Léonard
+    "Statut",               # à remplir manuellement : Postulé / Pas intéressé / En cours
+    "Comm",                 # commentaire libre
+    "URL",
     "Titre",
-    "Entreprise",
+    "Entreprise",           # nom de l'entreprise (col T)
     "Localisation",
+    "Dutch Required?",      # mandatory / preferred / vide si non mentionné (P2)
     "Salaire affiché",
     "Salaire estimé",       # estimé par Claude en passe 2
+    "Description entreprise",
     "Résumé",               # analyse complète P2 (vide si P2 non réalisée)
     "Points forts",
     "Red flags",
@@ -45,13 +54,8 @@ COLUMNS = [
     "Secteur",
     "Séniorité",
     "Funding / Type",
-    "Description entreprise",
     "Description offre",    # description complète récupérée via API
-    "Dutch Required?",      # mandatory / preferred / vide si non mentionné (P2)
-    "ID LinkedIn",          # identifiant numérique extrait de l'URL LinkedIn
-    "URL",
     "Source",
-    "Statut",               # à remplir manuellement : Postulé / Pas intéressé / En cours
 ]
 
 
@@ -151,6 +155,9 @@ SHORTLIST_THRESHOLD = 6
 # Première colonne modifiée par la P2 (les colonnes avant sont figées après la P1)
 P2_START_COL = "Accepté"
 
+# Colonnes remplies manuellement par Léonard — jamais écrasées par le code
+MANUAL_COLUMNS = {"Score Léo", "Reco Léo", "Motif Léo", "Statut", "Comm"}
+
 import re as _re
 
 def _linkedin_id(url: str) -> str:
@@ -186,50 +193,60 @@ def job_to_row(job: dict) -> list:
         reco_p2 = ""
 
     return [
-        job.get("email_date", ""),
-        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
-        score_p1,
-        resume_p1,
-        "TRUE" if accepted else "FALSE",
-        date_p2,
-        score_p2,
-        reco_p2,
-        job.get("score_role", "") if scored_p2 else "",
-        job.get("score_company", "") if scored_p2 else "",
-        job.get("score_location", "") if scored_p2 else "",
-        job.get("title", ""),
-        job.get("company", ""),
-        job.get("location", ""),
-        job.get("salary", ""),
-        job.get("salary_estimate", "") if scored_p2 else "",
-        resume_p2,
-        job.get("strengths", "") if scored_p2 else "",
-        job.get("red_flags", "") if scored_p2 else "",
-        job.get("company_size", ""),
-        job.get("company_industry", ""),
-        job.get("seniority_level", ""),
-        job.get("company_funding", ""),
-        job.get("company_description", ""),
-        job.get("description", ""),
-        job.get("dutch_required", "") if scored_p2 else "",
-        _linkedin_id(job.get("url", "")),
-        job.get("url", ""),
-        job.get("source", ""),
-        "",  # Statut — à remplir manuellement
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),  # Date ajout (P1)
+        _linkedin_id(job.get("url", "")),                        # ID LinkedIn
+        job.get("email_date", ""),                               # Date offre
+        score_p1,                                                # Score P1 /10
+        resume_p1,                                               # Résumé P1
+        "TRUE" if accepted else "FALSE",                         # Accepté
+        date_p2,                                                 # Date P2
+        score_p2,                                                # Score P2 /10
+        reco_p2,                                                 # Reco P2
+        job.get("score_role", "") if scored_p2 else "",          # Rôle
+        job.get("score_company", "") if scored_p2 else "",       # Score Entreprise
+        job.get("score_location", "") if scored_p2 else "",      # Lieu
+        "",  # Score Léo — manuel
+        "",  # Reco Léo — manuel
+        "",  # Motif Léo — manuel
+        "",  # Statut — manuel
+        "",  # Comm — manuel
+        job.get("url", ""),                                      # URL
+        job.get("title", ""),                                    # Titre
+        job.get("company", ""),                                  # Entreprise
+        job.get("location", ""),                                 # Localisation
+        job.get("dutch_required", "") if scored_p2 else "",      # Dutch Required?
+        job.get("salary", ""),                                   # Salaire affiché
+        job.get("salary_estimate", "") if scored_p2 else "",     # Salaire estimé
+        job.get("company_description", ""),                      # Description entreprise
+        resume_p2,                                               # Résumé
+        job.get("strengths", "") if scored_p2 else "",           # Points forts
+        job.get("red_flags", "") if scored_p2 else "",           # Red flags
+        job.get("company_size", ""),                             # Taille entreprise
+        job.get("company_industry", ""),                         # Secteur
+        job.get("seniority_level", ""),                          # Séniorité
+        job.get("company_funding", ""),                          # Funding / Type
+        job.get("description", ""),                              # Description offre
+        job.get("source", ""),                                   # Source
     ]
 
 
-def job_to_p2_cells(job: dict) -> tuple[str, str, list]:
+def job_to_p2_updates(job: dict, row_num: int) -> list[dict]:
     """
-    Retourne (col_start, col_end, values) pour mettre à jour uniquement les colonnes P2.
-    Les colonnes P1 (Date offre, Date ajout, Score P1, Résumé P1) ne sont pas touchées.
+    Retourne une liste de dicts {range, values} pour mettre à jour uniquement les colonnes P2,
+    en sautant les colonnes manuelles (Score Léo, Reco Léo, etc.) pour ne pas les écraser.
     """
     full_row = job_to_row(job)
     p2_start_idx = COLUMNS.index(P2_START_COL)
-    p2_values = full_row[p2_start_idx:]
-    col_start = _col_letter(p2_start_idx)
-    col_end = _col_letter(len(COLUMNS) - 1)
-    return col_start, col_end, p2_values
+    updates = []
+    for i in range(p2_start_idx, len(COLUMNS)):
+        if COLUMNS[i] in MANUAL_COLUMNS:
+            continue
+        col = _col_letter(i)
+        updates.append({
+            "range": f"{TAB_NAME}!{col}{row_num}",
+            "values": [[full_row[i]]],
+        })
+    return updates
 
 
 def write_jobs_to_sheets(jobs: list[dict], spreadsheet_id: str = "") -> str:
