@@ -11,8 +11,8 @@ import yaml
 import anthropic
 
 PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "profile.yaml")
-ENRICHMENT_THRESHOLD = 6      # score final → Accepté=TRUE
-PRE_ENRICHMENT_THRESHOLD = 4  # score passe 1 → déclenche RapidAPI
+PRE_ENRICHMENT_THRESHOLD = 5  # score P1 min → déclenche enrichissement + P2
+ENRICHMENT_THRESHOLD = PRE_ENRICHMENT_THRESHOLD  # alias pour compatibilité
 
 BELGIUM_KEYWORDS = [
     "belgium", "belgique", "brussels", "bruxelles", "gent", "ghent",
@@ -141,8 +141,8 @@ RÈGLES KO DUR (go=false, score=0) :
 - Salaire explicitement <80k€
 
 Réponds UNIQUEMENT avec un array JSON, une ligne par offre, AUCUN texte autour.
-Pour les go=false, ajoute un champ "reason" (5-8 mots max, cause principale) :
-[{"id":"...","score":7,"go":true},{"id":"...","score":2,"go":false,"reason":"Rôle dev pur, hors profil"},...]"""
+Ajoute TOUJOURS un champ "reason" (5-8 mots max) : cause du rejet ou raison principale du score élevé :
+[{"id":"...","score":7,"go":true,"reason":"Head of Ops, scale-up mobilité Bruxelles"},{"id":"...","score":2,"go":false,"reason":"Rôle dev pur, hors profil"},...]"""
 
 
 def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str, dict]:
@@ -347,6 +347,7 @@ def score_pass1(jobs: list[dict], verbose: bool = True) -> list[ScoredJob]:
             scored.reject_reason = r.get("reject_reason") or r.get("reason") or "Score P1 trop bas"
         else:
             scored.reject_reason = ""
+            scored._extra["p1_reason"] = r.get("reason", "")
         scored_list.append(scored)
 
         if verbose:

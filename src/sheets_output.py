@@ -26,8 +26,8 @@ COLUMNS = [
     "ID LinkedIn",          # identifiant numérique extrait de l'URL LinkedIn
     "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
     "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
-    "Résumé P1",            # raison rejet P1 ou note GO
-    "Accepté",              # TRUE si score >= seuil et non rejeté, FALSE sinon
+    "Résumé P1",            # raison rejet ou score P1
+    "Go P2?",               # GO si score >= seuil et non rejeté, NO GO sinon
     "Date P2",              # date de la passe 2 (vide si non réalisée)
     "Score P2 /10",         # score passe 2 (vide si P2 non réalisée)
     "Reco P2",              # GO ou NO GO selon Claude en P2
@@ -150,10 +150,10 @@ def get_existing_urls(service, spreadsheet_id: str) -> set:
     return {row[0] for row in values if row}
 
 
-SHORTLIST_THRESHOLD = 6
+SHORTLIST_THRESHOLD = 5
 
 # Première colonne modifiée par la P2 (les colonnes avant sont figées après la P1)
-P2_START_COL = "Accepté"
+P2_START_COL = "Go P2?"
 
 # Colonnes manuelles — jamais écrasées par le code
 MANUAL_COLUMNS = {"Score User", "Reco User", "Motif User", "Statut", "Comm"}
@@ -174,14 +174,10 @@ def job_to_row(job: dict) -> list:
     date_p2 = job.get("date_scoring_p2", "") if scored_p2 else ""
 
     effective_score = job.get("score_total", 0)
-    accepted = not is_rejected and effective_score >= SHORTLIST_THRESHOLD
+    go_p2 = not is_rejected and effective_score >= SHORTLIST_THRESHOLD
 
-    # Résumé P1 : toujours rempli — raison rejet si rejeté, sinon note courte GO
-    score_p1_val = job.get("score_p1", job.get("score_total", 0))
-    if is_rejected:
-        resume_p1 = job.get("reject_reason", "") or "Rejeté"
-    else:
-        resume_p1 = f"GO — Score P1 : {score_p1_val}/10"
+    # Résumé P1 : raison du score fournie par Claude (rejet ou point fort)
+    resume_p1 = job.get("reject_reason", "") or job.get("p1_reason", "")
 
     # Résumé P2 : analyse complète Claude, uniquement si P2 réalisée
     resume_p2 = job.get("summary", "") if scored_p2 else ""
@@ -198,7 +194,7 @@ def job_to_row(job: dict) -> list:
         job.get("email_date", ""),                               # Date offre
         score_p1,                                                # Score P1 /10
         resume_p1,                                               # Résumé P1
-        "TRUE" if accepted else "FALSE",                         # Accepté
+        "GO" if go_p2 else "NO GO",                              # Go P2?
         date_p2,                                                 # Date P2
         score_p2,                                                # Score P2 /10
         reco_p2,                                                 # Reco P2

@@ -365,7 +365,7 @@ def main():
 
     # --- Résumé final ---
     print("\n" + "=" * 60)
-    print("RÉSUMÉ — Offres shortlistées (Accepté = TRUE)")
+    print("RÉSUMÉ — Offres shortlistées (Go P2? = GO)")
     print("=" * 60)
     top = [j for j in all_jobs_dict if j.get("score_total", 0) >= ENRICHMENT_THRESHOLD and not j.get("hard_reject")]
     top.sort(key=lambda x: x.get("score_total", 0), reverse=True)
