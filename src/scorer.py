@@ -117,7 +117,7 @@ def _parse_json_object(raw: str) -> dict:
 # Passe 1 — batch, compact, GO/NO-GO uniquement
 # ---------------------------------------------------------------------------
 
-PASS1_SYSTEM = """Tu es un filtre de recrutement. Évalue chaque offre pour Léonard Maguin.
+PASS1_SYSTEM = """Tu es un filtre de recrutement. Évalue chaque offre selon le profil ci-dessous.
 
 PROFIL (résumé) :
 - Senior Ops & Product Builder, 14 ans XP, Bruxelles
@@ -219,9 +219,9 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
     strong_roles = ", ".join(profile["target_roles"]["strong_match"])
     acceptable_roles = ", ".join(profile["target_roles"]["acceptable"])
 
-    return f"""Tu es un expert en recrutement senior. Analyse en détail cette offre pour Léonard Maguin.
+    return f"""Tu es un expert en recrutement senior. Analyse en détail cette offre selon le profil ci-dessous.
 
-## PROFIL DE LÉONARD
+## PROFIL
 - Senior Ops & Product Builder, 14 ans XP, École Centrale Paris
 - Localisation : Bruxelles. Cherche en Belgique (max 1h) ou remote/hybride.
 - Rôles idéaux : {strong_roles}
@@ -260,7 +260,7 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
   "company_description": "2-3 phrases : ce que fait la société, son marché, son produit ou service principal.",
   "strengths": "Point fort 1. Point fort 2. Point fort 3.",
   "red_flags": "Red flag éventuel.",
-  "summary": "2-3 phrases concrètes : pourquoi Léonard devrait ou non postuler, ce qui manque pour décider."
+  "summary": "2-3 phrases concrètes : pourquoi le candidat devrait ou non postuler, ce qui manque pour décider."
 }}
 
 Règles de scoring :

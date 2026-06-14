@@ -228,7 +228,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("JOB SCANNER — Léonard Maguin")
+    print("JOB SCANNER")
     print("=" * 60)
 
     if args.rescore_p2 or args.rescore_id:

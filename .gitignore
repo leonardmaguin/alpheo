@@ -1,6 +1,7 @@
 .env
 token.json
 credentials.json
+profile.yaml
 __pycache__/
 *.pyc
 *.json

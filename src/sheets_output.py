@@ -34,9 +34,9 @@ COLUMNS = [
     "Rôle",                 # score rôle (P2)
     "Score Entreprise",     # score entreprise (P2)
     "Lieu",                 # score localisation (P2)
-    "Score Léo",            # score manuel de Léonard (à remplir)
-    "Reco Léo",             # recommandation manuelle de Léonard
-    "Motif Léo",            # motif manuel de Léonard
+    "Score User",            # score manuel (à remplir)
+    "Reco User",             # recommandation manuelle
+    "Motif User",            # motif manuel
     "Statut",               # à remplir manuellement : Postulé / Pas intéressé / En cours
     "Comm",                 # commentaire libre
     "URL",
@@ -155,8 +155,8 @@ SHORTLIST_THRESHOLD = 6
 # Première colonne modifiée par la P2 (les colonnes avant sont figées après la P1)
 P2_START_COL = "Accepté"
 
-# Colonnes remplies manuellement par Léonard — jamais écrasées par le code
-MANUAL_COLUMNS = {"Score Léo", "Reco Léo", "Motif Léo", "Statut", "Comm"}
+# Colonnes manuelles — jamais écrasées par le code
+MANUAL_COLUMNS = {"Score User", "Reco User", "Motif User", "Statut", "Comm"}
 
 import re as _re
 
@@ -205,9 +205,9 @@ def job_to_row(job: dict) -> list:
         job.get("score_role", "") if scored_p2 else "",          # Rôle
         job.get("score_company", "") if scored_p2 else "",       # Score Entreprise
         job.get("score_location", "") if scored_p2 else "",      # Lieu
-        "",  # Score Léo — manuel
-        "",  # Reco Léo — manuel
-        "",  # Motif Léo — manuel
+        "",  # Score User — manuel
+        "",  # Reco User — manuel
+        "",  # Motif User — manuel
         "",  # Statut — manuel
         "",  # Comm — manuel
         job.get("url", ""),                                      # URL
@@ -233,7 +233,7 @@ def job_to_row(job: dict) -> list:
 def job_to_p2_updates(job: dict, row_num: int) -> list[dict]:
     """
     Retourne une liste de dicts {range, values} pour mettre à jour uniquement les colonnes P2,
-    en sautant les colonnes manuelles (Score Léo, Reco Léo, etc.) pour ne pas les écraser.
+    en sautant les colonnes manuelles (Score User, Reco User, etc.) pour ne pas les écraser.
     """
     full_row = job_to_row(job)
     p2_start_idx = COLUMNS.index(P2_START_COL)
