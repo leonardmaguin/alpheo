@@ -56,6 +56,13 @@ COLUMNS = [
     "Funding / Type",
     "Description offre",    # description complète récupérée via API
     "Source",
+    "Question 1",
+    "Response 1",
+    "Question 2",
+    "Response 2",
+    "Question 3",
+    "Response 3",
+    "Answer Questions",     # commande CLI pour déclencher les réponses aux questions
 ]
 
 
@@ -156,7 +163,8 @@ SHORTLIST_THRESHOLD = 5
 P2_START_COL = "Go P2?"
 
 # Colonnes manuelles — jamais écrasées par le code
-MANUAL_COLUMNS = {"Score User", "Reco User", "Motif User", "Statut", "Comm"}
+MANUAL_COLUMNS = {"Score User", "Reco User", "Motif User", "Statut", "Comm",
+                  "Question 1", "Question 2", "Question 3"}
 
 import re as _re
 
@@ -223,6 +231,13 @@ def job_to_row(job: dict) -> list:
         job.get("company_funding", ""),                          # Funding / Type
         job.get("description", ""),                              # Description offre
         job.get("source", ""),                                   # Source
+        "",  # Question 1 — manuel
+        "",  # Response 1
+        "",  # Question 2 — manuel
+        "",  # Response 2
+        "",  # Question 3 — manuel
+        "",  # Response 3
+        f'python main.py --answer-questions {_linkedin_id(job.get("url", ""))}',  # Answer Questions
     ]
 
 

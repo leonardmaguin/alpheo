@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
-from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_updates, _col_letter
+from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_updates, _col_letter, _linkedin_id
 
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
@@ -204,6 +204,103 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False
     print(f"\n[Rescore P2] {updated} ligne(s) mises à jour dans le Sheets.")
 
 
+def run_answer_questions(linkedin_id: str):
+    """
+    Lit les questions Q1/Q2/Q3 depuis le Sheets pour l'offre donnée,
+    appelle Claude Sonnet pour y répondre, écrit les réponses en retour.
+    """
+    from question_answerer import answer_questions_for_job
+
+    service = get_sheets_service()
+    sid = get_or_create_spreadsheet(service, SPREADSHEET_ID)
+
+    print(f"\n[Questions] Lecture du Sheets pour ID LinkedIn = {linkedin_id}...")
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sid, range=f"{TAB_NAME}!A2:{_col_letter(len(COLUMNS)-1)}5000"
+    ).execute()
+    rows = result.get("values", [])
+
+    def col(name):
+        idx = COLUMNS.index(name)
+        return lambda row: row[idx] if idx < len(row) else ""
+
+    get_url         = col("URL")
+    get_title       = col("Titre")
+    get_company     = col("Entreprise")
+    get_location    = col("Localisation")
+    get_salary      = col("Salaire affiché")
+    get_industry    = col("Secteur")
+    get_size        = col("Taille entreprise")
+    get_seniority   = col("Séniorité")
+    get_summary     = col("Résumé")
+    get_strengths   = col("Points forts")
+    get_co_desc     = col("Description entreprise")
+    get_desc        = col("Description offre")
+    get_q1          = col("Question 1")
+    get_q2          = col("Question 2")
+    get_q3          = col("Question 3")
+
+    target_row = None
+    target_data = None
+    for i, row in enumerate(rows):
+        url = get_url(row)
+        if _linkedin_id(url) == linkedin_id:
+            target_row = i + 2  # 1-indexed + header
+            target_data = row
+            break
+
+    if not target_row:
+        print(f"[Questions] ID LinkedIn {linkedin_id} introuvable dans le Sheets.")
+        return
+
+    job = {
+        "title":               get_title(target_data),
+        "company":             get_company(target_data),
+        "location":            get_location(target_data),
+        "salary":              get_salary(target_data),
+        "company_industry":    get_industry(target_data),
+        "company_size":        get_size(target_data),
+        "seniority_level":     get_seniority(target_data),
+        "summary":             get_summary(target_data),
+        "strengths":           get_strengths(target_data),
+        "company_description": get_co_desc(target_data),
+        "description":         get_desc(target_data),
+    }
+
+    questions = [get_q1(target_data), get_q2(target_data), get_q3(target_data)]
+    active = [q for q in questions if q and q.strip()]
+    if not active:
+        print(f"[Questions] Aucune question remplie pour cette offre (colonnes Question 1/2/3 vides).")
+        return
+
+    print(f"[Questions] {len(active)} question(s) trouvée(s) pour : {job['title']} @ {job['company']}")
+    for i, q in enumerate(active):
+        print(f"  Q{i+1}: {q}")
+
+    responses = answer_questions_for_job(job, questions)
+
+    # Écriture des réponses dans le Sheets
+    updates = []
+    for resp_key, col_name in [("response_1", "Response 1"), ("response_2", "Response 2"), ("response_3", "Response 3")]:
+        col_letter = _col_letter(COLUMNS.index(col_name))
+        updates.append({
+            "range": f"{TAB_NAME}!{col_letter}{target_row}",
+            "values": [[responses[resp_key]]],
+        })
+
+    service.spreadsheets().values().batchUpdate(
+        spreadsheetId=sid,
+        body={"valueInputOption": "USER_ENTERED", "data": updates},
+    ).execute()
+
+    print(f"\n[Questions] Réponses écrites dans la ligne {target_row} :")
+    for i, (resp_key, _) in enumerate([("response_1", ""), ("response_2", ""), ("response_3", "")]):
+        r = responses[resp_key]
+        if r:
+            print(f"\n  Q{i+1}: {questions[i]}")
+            print(f"  → {r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Job Scanner — trouve les offres qui te correspondent")
     parser.add_argument("--days", type=int, default=1, help="Nombre de jours à couvrir (défaut: 1)")
@@ -225,11 +322,17 @@ def main():
                         help="Rescore même les lignes qui ont déjà une P2")
     parser.add_argument("--rescore-id", type=str, default="", metavar="LINKEDIN_ID",
                         help="Rescore uniquement l'offre avec cet ID LinkedIn (implique --rescore-force)")
+    parser.add_argument("--answer-questions", type=str, default="", metavar="LINKEDIN_ID",
+                        help="Lit les questions Q1/Q2/Q3 du Sheets et génère les réponses avec Claude Sonnet")
     args = parser.parse_args()
 
     print("=" * 60)
     print("JOB SCANNER")
     print("=" * 60)
+
+    if args.answer_questions:
+        run_answer_questions(args.answer_questions)
+        return
 
     if args.rescore_p2 or args.rescore_id:
         run_rescore_p2(
