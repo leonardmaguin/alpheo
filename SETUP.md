@@ -160,3 +160,4 @@ Les changements sont pris en compte au prochain run sans toucher au code.
 | Google APIs | Gmail + Sheets | Gratuit |
 
 **Total : < 2$/mois** pour un usage quotidien.
+
