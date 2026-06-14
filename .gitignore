@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 *.json
 !*.example.json
+*.docx
+*.pdf
+profile_memo.md
