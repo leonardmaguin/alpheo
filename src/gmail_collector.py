@@ -75,8 +75,17 @@ def fetch_linkedin_alert_emails(service, days_back: int = 1, skip_days: int = 0)
         before_str = before.strftime("%Y/%m/%d")
         query += f' before:{before_str}'
 
-    result = service.users().messages().list(userId="me", q=query, maxResults=100).execute()
-    messages = result.get("messages", [])
+    messages = []
+    page_token = None
+    while True:
+        params = {"userId": "me", "q": query, "maxResults": 500}
+        if page_token:
+            params["pageToken"] = page_token
+        result = service.users().messages().list(**params).execute()
+        messages.extend(result.get("messages", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            break
 
     emails = []
     for msg in messages:

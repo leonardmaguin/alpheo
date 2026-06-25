@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
-from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_updates, _col_letter, _linkedin_id
+from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_updates, _col_letter, _linkedin_id, get_sheets_job_state
 
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
@@ -374,9 +374,30 @@ def main():
         return
     print(f"     → {len(raw_jobs)} offre(s) collectée(s)")
 
+    # --- Chargement de l'état du Sheets (avant tout scoring) ---
+    existing_ids: set = set()
+    p2_done_ids: set = set()
+    if not args.no_sheets and not args.test and not args.test_one:
+        try:
+            _svc_pre = get_sheets_service()
+            _sid_pre = get_or_create_spreadsheet(_svc_pre, SPREADSHEET_ID)
+            existing_ids, p2_done_ids = get_sheets_job_state(_svc_pre, _sid_pre)
+            already_known = sum(1 for j in raw_jobs if _linkedin_id(j.get("url", "")) in existing_ids)
+            if already_known:
+                print(f"     → {already_known} offre(s) déjà dans le Sheets (skip P1+P2)")
+        except Exception as e:
+            print(f"[Sheets] Impossible de charger l'état existant : {e}")
+
+    # Filtre P1 : exclut les offres déjà dans le Sheets (par ID LinkedIn)
+    new_jobs = [j for j in raw_jobs if _linkedin_id(j.get("url", "")) not in existing_ids]
+
+    if not new_jobs:
+        print("Aucune nouvelle offre à scorer.")
+        return
+
     # --- ÉTAPE 2a : Scoring passe 1 (sans description) ---
-    print(f"\n[2/4] Scoring passe 1 (titre + entreprise + localisation)...")
-    scored_p1 = score_all_jobs(raw_jobs, verbose=True, pass2=False)
+    print(f"\n[2/4] Scoring passe 1 ({len(new_jobs)} nouvelle(s) offre(s))...")
+    scored_p1 = score_all_jobs(new_jobs, verbose=True, pass2=False)
 
     # Offres à enrichir : non-rejetées avec score passe 1 >= seuil pré-enrichissement
     to_enrich = [j for j in scored_p1 if not j.hard_reject and j.score_total >= PRE_ENRICHMENT_THRESHOLD]
@@ -416,8 +437,14 @@ def main():
             print(f"\n[3/4] Enrichissement ignoré (RAPIDAPI_KEY non défini)")
 
     # --- ÉTAPE 2c : Scoring passe 2 (avec description si disponible) ---
-    has_description = [j for j in to_enrich_dicts if len(j.get("description", "")) > 150]
-    no_description  = [j for j in to_enrich_dicts if len(j.get("description", "")) <= 150]
+    # Skip les offres dont P2 est déjà faite dans le Sheets (ne devrait pas arriver
+    # puisqu'on filtre P1, mais sécurise en cas de run partiel précédent)
+    has_description = [j for j in to_enrich_dicts
+                       if len(j.get("description", "")) > 150
+                       and _linkedin_id(j.get("url", "")) not in p2_done_ids]
+    no_description  = [j for j in to_enrich_dicts
+                       if len(j.get("description", "")) <= 150
+                       or _linkedin_id(j.get("url", "")) in p2_done_ids]
 
     final_scored = []
     if has_description:
@@ -476,7 +503,8 @@ def main():
     if top:
         for j in top:
             score = j.get("score_total", 0)
-            bar = "█" * score + "░" * (10 - score)
+            score_int = int(round(score))
+            bar = "█" * score_int + "░" * (10 - score_int)
             print(f"  {bar} {score}/10 — {j.get('title')} @ {j.get('company')}")
             print(f"           {j.get('summary', '')[:120]}")
             print(f"           {j.get('url', '')}")

@@ -143,18 +143,37 @@ def _col_letter(index: int) -> str:
     return result
 
 
-def get_existing_urls(service, spreadsheet_id: str) -> set:
-    """Récupère les URLs déjà présentes pour éviter les doublons."""
-    url_col_index = COLUMNS.index("URL")
-    col = _col_letter(url_col_index)
+def get_sheets_job_state(service, spreadsheet_id: str) -> tuple[set, set]:
+    """
+    Retourne deux sets d'IDs LinkedIn depuis le Sheets :
+    - existing_ids : tous les IDs déjà présents (pour skip P1)
+    - p2_done_ids  : IDs dont la colonne 'Date P2' est non vide (pour skip P2)
+
+    On se base sur l'ID LinkedIn (col B) plutôt que l'URL pour être robuste
+    aux variations d'URL (paramètres tracking, /comm/ vs direct, etc.).
+    """
+    id_col_index = COLUMNS.index("ID LinkedIn")
+    date_p2_col_index = COLUMNS.index("Date P2")
+    last_col = _col_letter(max(id_col_index, date_p2_col_index))
 
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"{TAB_NAME}!{col}2:{col}10000"
+        range=f"{TAB_NAME}!A2:{last_col}10000"
     ).execute()
 
-    values = result.get("values", [])
-    return {row[0] for row in values if row}
+    rows = result.get("values", [])
+    existing_ids = set()
+    p2_done_ids = set()
+
+    for row in rows:
+        linkedin_id = row[id_col_index] if id_col_index < len(row) else ""
+        date_p2 = row[date_p2_col_index] if date_p2_col_index < len(row) else ""
+        if linkedin_id:
+            existing_ids.add(linkedin_id)
+            if date_p2:
+                p2_done_ids.add(linkedin_id)
+
+    return existing_ids, p2_done_ids
 
 
 SHORTLIST_THRESHOLD = 5
@@ -268,9 +287,9 @@ def write_jobs_to_sheets(jobs: list[dict], spreadsheet_id: str = "") -> str:
     service = get_sheets_service()
     spreadsheet_id = get_or_create_spreadsheet(service, spreadsheet_id)
     ensure_header(service, spreadsheet_id)
-    existing_urls = get_existing_urls(service, spreadsheet_id)
+    existing_ids, _ = get_sheets_job_state(service, spreadsheet_id)
 
-    new_jobs = [j for j in jobs if j.get("url") not in existing_urls]
+    new_jobs = [j for j in jobs if _linkedin_id(j.get("url", "")) not in existing_ids]
     if not new_jobs:
         print("[Sheets] Aucune nouvelle offre à ajouter (toutes déjà présentes)")
         return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
