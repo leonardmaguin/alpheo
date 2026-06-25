@@ -14,12 +14,41 @@ PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "profile.yaml")
 PRE_ENRICHMENT_THRESHOLD = 5  # score P1 min → déclenche enrichissement + P2
 ENRICHMENT_THRESHOLD = PRE_ENRICHMENT_THRESHOLD  # alias pour compatibilité
 
-BELGIUM_KEYWORDS = [
-    "belgium", "belgique", "brussels", "bruxelles", "gent", "ghent",
-    "antwerp", "anvers", "liège", "liege", "leuven", "louvain",
-    "zaventem", "mechelen", "malines", "namur", "mons", "charleroi",
-    "remote", "télétravail", "teletravail", "hybrid", "hybride",
+# Indicateurs explicitement hors Belgique — si l'un d'eux est trouvé, l'offre est rejetée.
+# Logique inverse : on rejette le connu-étranger plutôt que d'énumérer toutes les villes belges.
+NON_BELGIUM_KEYWORDS = [
+    # Pays
+    "france", "french", "paris", "lyon", "marseille", "toulouse", "bordeaux",
+    "nantes", "lille", "strasbourg", "nice", "montpellier", "rennes",
+    "united kingdom", "royaume-uni", "uk,", " uk ", "london", "londres",
+    "manchester", "birmingham", "edinburgh", "glasgow",
+    "netherlands", "pays-bas", "amsterdam", "rotterdam", "utrecht", "eindhoven",
+    "germany", "allemagne", "berlin", "munich", "münchen", "hamburg", "frankfurt",
+    "luxembourg city", "luxembourg,",  # "luxembourg" seul peut être la province belge
+    "switzerland", "suisse", "zürich", "zurich", "geneva", "genève",
+    "spain", "espagne", "madrid", "barcelona",
+    "italy", "italie", "milan", "milano", "rome",
+    "united states", "usa", "new york", "san francisco",
+    "canada", "toronto", "montreal",
+    "israel", "tel aviv",
+    "dubai", "uae",
+    "portsmouth", "huntingdon", "gibraltar",
+    # Codes postaux français (commencent par 75, 69, 13, 31, etc.) — trop risqué, on skip
 ]
+
+
+def is_belgium(location: str) -> bool:
+    """Retourne True si la localisation est vraisemblablement en Belgique.
+    Logique : on rejette si un indicateur étranger connu est détecté, sinon on accepte.
+    Cela évite de devoir lister toutes les villes/codes postaux belges.
+    """
+    if not location:
+        return True
+    loc = location.lower()
+    # Remote/hybride sans contrainte géographique : OK
+    if any(kw in loc for kw in ("remote", "télétravail", "teletravail", "hybrid", "hybride")):
+        return True
+    return not any(kw in loc for kw in NON_BELGIUM_KEYWORDS)
 
 
 # ---------------------------------------------------------------------------
@@ -94,11 +123,6 @@ class ScoredJob:
 def load_profile() -> dict:
     with open(PROFILE_PATH, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
-
-
-def is_belgium(location: str) -> bool:
-    loc = location.lower()
-    return not loc or any(kw in loc for kw in BELGIUM_KEYWORDS)
 
 
 def _parse_json_array(raw: str) -> list:
