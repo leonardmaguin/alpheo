@@ -129,7 +129,11 @@ def run_rescore_p1():
     p1_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
     url_to_row = {j["url"]: j["sheet_row"] for j in to_rescore}
-    updated = 0
+
+    # Collecte tous les updates en une seule liste, puis un seul batchUpdate
+    # (évite le 429 Sheets : 60 write requests/min si on fait 1 requête par ligne)
+    all_updates = []
+    log_lines = []
     for job in scored:
         d = job.to_dict()
         d["score_p1"] = job.score_total
@@ -138,17 +142,26 @@ def run_rescore_p1():
         row_num = url_to_row.get(url)
         if not row_num:
             continue
-        updates = job_to_p1_updates(d, row_num)
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=sid,
-            body={"valueInputOption": "USER_ENTERED", "data": updates},
-        ).execute()
+        all_updates.extend(job_to_p1_updates(d, row_num))
         score = d.get("score_p1", "?")
         reason = d.get("reject_reason") or d.get("p1_reason", "")
-        print(f"[Rescore P1] Ligne {row_num} — {score}/10 — {d['title']} @ {d['company']} | {reason}")
-        updated += 1
+        log_lines.append(f"[Rescore P1] Ligne {row_num} — {score}/10 — {d['title']} @ {d['company']} | {reason}")
 
-    print(f"\n[Rescore P1] {updated} ligne(s) mises à jour.")
+    # Découpe en sous-batches de 1000 ranges (limite Sheets API) avec pause entre chacun
+    import time as _time
+    SHEETS_BATCH = 1000
+    for i in range(0, len(all_updates), SHEETS_BATCH):
+        chunk = all_updates[i:i + SHEETS_BATCH]
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=sid,
+            body={"valueInputOption": "USER_ENTERED", "data": chunk},
+        ).execute()
+        if i + SHEETS_BATCH < len(all_updates):
+            _time.sleep(1)
+
+    for line in log_lines:
+        print(line)
+    print(f"\n[Rescore P1] {len(log_lines)} ligne(s) mises à jour.")
 
 
 def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False, only_id: str = ""):
