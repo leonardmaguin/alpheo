@@ -22,9 +22,10 @@ SHEET_NAME = "Job Scanner"
 TAB_NAME = "Offres"
 
 COLUMNS = [
-    "Date ajout (P1)",      # date d'ajout dans le Sheets (P1)
+    "Date ajout",           # date d'ajout dans le Sheets
     "ID LinkedIn",          # identifiant numérique extrait de l'URL LinkedIn
     "Date offre",           # date de l'email LinkedIn (YYYY-MM-DD)
+    "Date P1",              # date du scoring P1
     "Score P1 /10",         # score passe 1 (titre + entreprise + localisation)
     "Résumé P1",            # raison rejet ou score P1
     "Go P2?",               # GO si score >= seuil et non rejeté, NO GO sinon
@@ -63,6 +64,7 @@ COLUMNS = [
     "Question 3",
     "Response 3",
     "Answer Questions",     # commande CLI pour déclencher les réponses aux questions
+    "Adapt CV",             # manuel
 ]
 
 
@@ -178,12 +180,15 @@ def get_sheets_job_state(service, spreadsheet_id: str) -> tuple[set, set]:
 
 SHORTLIST_THRESHOLD = 5
 
-# Première colonne modifiée par la P2 (les colonnes avant sont figées après la P1)
+# Première colonne modifiée par un rescore P1 (colonnes avant = Date ajout, ID, Date offre)
+P1_START_COL = "Date P1"
+
+# Première colonne modifiée par la P2 (les colonnes P1 sont figées après insertion)
 P2_START_COL = "Go P2?"
 
 # Colonnes manuelles — jamais écrasées par le code
 MANUAL_COLUMNS = {"Score User", "Reco User", "Motif User", "Statut", "Comm",
-                  "Question 1", "Question 2", "Question 3"}
+                  "Question 1", "Question 2", "Question 3", "Adapt CV"}
 
 import re as _re
 
@@ -215,10 +220,14 @@ def job_to_row(job: dict) -> list:
     else:
         reco_p2 = ""
 
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    date_p1 = job.get("date_scoring_p1", now)
+
     return [
-        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),  # Date ajout (P1)
+        now,                                                     # Date ajout
         _linkedin_id(job.get("url", "")),                        # ID LinkedIn
         job.get("email_date", ""),                               # Date offre
+        date_p1,                                                 # Date P1
         score_p1,                                                # Score P1 /10
         resume_p1,                                               # Résumé P1
         "GO" if go_p2 else "NO GO",                              # Go P2?
@@ -257,7 +266,28 @@ def job_to_row(job: dict) -> list:
         "",  # Question 3 — manuel
         "",  # Response 3
         f'python main.py --answer-questions {_linkedin_id(job.get("url", ""))}',  # Answer Questions
+        "",  # Adapt CV — manuel
     ]
+
+
+def job_to_p1_updates(job: dict, row_num: int) -> list[dict]:
+    """
+    Retourne une liste de dicts {range, values} pour mettre à jour uniquement les colonnes P1
+    (Date P1, Score P1, Résumé P1, Go P2?), sans toucher les colonnes avant ni les manuelles.
+    """
+    full_row = job_to_row(job)
+    p1_start_idx = COLUMNS.index(P1_START_COL)
+    p2_start_idx = COLUMNS.index(P2_START_COL)
+    updates = []
+    for i in range(p1_start_idx, p2_start_idx):
+        if COLUMNS[i] in MANUAL_COLUMNS:
+            continue
+        col = _col_letter(i)
+        updates.append({
+            "range": f"{TAB_NAME}!{col}{row_num}",
+            "values": [[full_row[i]]],
+        })
+    return updates
 
 
 def job_to_p2_updates(job: dict, row_num: int) -> list[dict]:

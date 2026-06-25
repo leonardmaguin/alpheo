@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
-from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p2_updates, _col_letter, _linkedin_id, get_sheets_job_state
+from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p1_updates, job_to_p2_updates, _col_letter, _linkedin_id, get_sheets_job_state
 
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
@@ -65,6 +65,90 @@ def run_test_mode():
             "url": "https://linkedin.com/jobs/view/test4", "collected_at": "",
         },
     ]
+
+
+def run_rescore_p1():
+    """
+    Récupère depuis le Sheets toutes les lignes dont Date P1 est vide,
+    relance le scoring P1 et met à jour les colonnes Date P1 / Score P1 / Résumé P1 / Go P2?.
+    Ne touche pas aux colonnes avant (Date ajout, ID, Date offre) ni aux colonnes manuelles.
+    """
+    service = get_sheets_service()
+    sid = get_or_create_spreadsheet(service, SPREADSHEET_ID)
+
+    print("\n[Rescore P1] Lecture du Sheets (lignes sans Date P1)...")
+    last_col = _col_letter(len(COLUMNS) - 1)
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sid, range=f"{TAB_NAME}!A2:{last_col}5000"
+    ).execute()
+    rows = result.get("values", [])
+
+    def col(name):
+        idx = COLUMNS.index(name)
+        return lambda row: row[idx] if idx < len(row) else ""
+
+    get_date_p1  = col("Date P1")
+    get_url      = col("URL")
+    get_title    = col("Titre")
+    get_company  = col("Entreprise")
+    get_location = col("Localisation")
+    get_salary   = col("Salaire affiché")
+    get_date_off = col("Date offre")
+
+    to_rescore = []
+    for i, row in enumerate(rows):
+        if get_date_p1(row):
+            continue
+        url = get_url(row)
+        if not url:
+            continue
+        to_rescore.append({
+            "sheet_row": i + 2,
+            "id": f"p1rescore_{i}",
+            "url": url,
+            "title": get_title(row),
+            "company": get_company(row),
+            "location": get_location(row),
+            "salary": get_salary(row),
+            "email_date": get_date_off(row),
+            "description": "",
+            "source": "sheets_rescore_p1",
+            "collected_at": "",
+        })
+
+    if not to_rescore:
+        print("[Rescore P1] Aucune ligne sans Date P1.")
+        return
+
+    print(f"[Rescore P1] {len(to_rescore)} ligne(s) à scorer :")
+    for j in to_rescore:
+        print(f"  ligne {j['sheet_row']} | {j['title']} @ {j['company']}")
+
+    from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD
+    scored = score_all_jobs(to_rescore, verbose=True, pass2=False)
+    p1_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+    url_to_row = {j["url"]: j["sheet_row"] for j in to_rescore}
+    updated = 0
+    for job in scored:
+        d = job.to_dict()
+        d["score_p1"] = job.score_total
+        d["date_scoring_p1"] = p1_date
+        url = d.get("url", "")
+        row_num = url_to_row.get(url)
+        if not row_num:
+            continue
+        updates = job_to_p1_updates(d, row_num)
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=sid,
+            body={"valueInputOption": "USER_ENTERED", "data": updates},
+        ).execute()
+        score = d.get("score_p1", "?")
+        reason = d.get("reject_reason") or d.get("p1_reason", "")
+        print(f"[Rescore P1] Ligne {row_num} — {score}/10 — {d['title']} @ {d['company']} | {reason}")
+        updated += 1
+
+    print(f"\n[Rescore P1] {updated} ligne(s) mises à jour.")
 
 
 def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False, only_id: str = ""):
@@ -322,6 +406,8 @@ def main():
                         help="Rescore même les lignes qui ont déjà une P2")
     parser.add_argument("--rescore-id", type=str, default="", metavar="LINKEDIN_ID",
                         help="Rescore uniquement l'offre avec cet ID LinkedIn (implique --rescore-force)")
+    parser.add_argument("--rescore-p1", action="store_true",
+                        help="Score en P1 toutes les lignes du Sheets dont Date P1 est vide (sans collecter les emails)")
     parser.add_argument("--answer-questions", type=str, default="", metavar="LINKEDIN_ID",
                         help="Lit les questions Q1/Q2/Q3 du Sheets et génère les réponses avec Claude Sonnet")
     args = parser.parse_args()
@@ -332,6 +418,10 @@ def main():
 
     if args.answer_questions:
         run_answer_questions(args.answer_questions)
+        return
+
+    if args.rescore_p1:
+        run_rescore_p1()
         return
 
     if args.rescore_p2 or args.rescore_id:
@@ -397,6 +487,7 @@ def main():
 
     # --- ÉTAPE 2a : Scoring passe 1 (sans description) ---
     print(f"\n[2/4] Scoring passe 1 ({len(new_jobs)} nouvelle(s) offre(s))...")
+    p1_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     scored_p1 = score_all_jobs(new_jobs, verbose=True, pass2=False)
 
     # Offres à enrichir : non-rejetées avec score passe 1 >= seuil pré-enrichissement
@@ -413,6 +504,7 @@ def main():
     for j in to_enrich:
         d = j.to_dict()
         d["score_p1"] = j.score_total
+        d["date_scoring_p1"] = p1_date
         to_enrich_dicts.append(d)
 
     if not args.no_enrich and os.environ.get("RAPIDAPI_KEY") and to_enrich_dicts:
@@ -472,6 +564,7 @@ def main():
     def _with_p1(scored_job):
         d = scored_job.to_dict()
         d["score_p1"] = scored_job.score_total
+        d["date_scoring_p1"] = p1_date
         return d
 
     all_jobs_dict = (

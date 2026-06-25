@@ -25,19 +25,22 @@ Alpheo/
 
 ```
 Gmail (alertes LinkedIn) → parse texte brut → JobOffer[]
+  → Filtre : exclut les offres déjà dans le Sheets (par ID LinkedIn)
   → Passe 1 (P1) : scoring batch Claude (1 appel pour toutes les offres) → score P1
   → Filtre : offres score P1 >= 5 → enrichissement RapidAPI (description complète)
   → Passe 2 (P2) : scoring individuel Claude (1 appel/offre, 5 workers) → analyse complète
   → Google Sheets (toutes les offres, rejetées incluses avec Go P2? = NO GO)
 ```
 
-## Commandes utiles
+## Commandes disponibles
+
+### Commande principale — scan complet
 
 ```powershell
 # Depuis le dossier Alpheo/, toujours préfixer avec :
 $env:PYTHONIOENCODING="utf-8"
 
-# Scan standard (24h)
+# Scan standard (dernières 24h)
 python main.py
 
 # Rattrapage sur N jours
@@ -46,13 +49,10 @@ python main.py --days 60
 # Fenêtre glissante : J-15 à J-8
 python main.py --from-day 8 --days 7
 
-# Test sans Gmail (4 offres fictives)
-python main.py --test --no-sheets
-
-# Sans enrichissement API (plus rapide, économise crédits)
+# Sans enrichissement API (plus rapide, économise crédits RapidAPI)
 python main.py --no-enrich
 
-# Limiter les appels API réels (le cache est toujours utilisé)
+# Limiter les appels API réels (le cache Sheets est toujours utilisé)
 python main.py --enrich-limit 3
 
 # Cache uniquement, 0 appel API réel
@@ -60,19 +60,66 @@ python main.py --enrich-limit 0
 
 # Sauvegarder aussi en JSON
 python main.py --output-json results.json
+```
 
-# Rescorer en P2 toutes les offres sans P2 (score P1 >= 6 par défaut)
+La commande principale skip automatiquement les offres déjà dans le Sheets (par ID LinkedIn) — P1 et P2 ne tournent que sur les nouvelles offres.
+
+---
+
+### Scorer en P1 les lignes sans Date P1 (depuis le Sheets, sans Gmail)
+
+```powershell
+python main.py --rescore-p1
+```
+
+**Quand l'utiliser :** après avoir nettoyé des lignes manuellement dans le Sheets (ex : effacer Date P1 / Score P1 / Résumé P1 pour forcer un re-scoring), ou après une correction du prompt P1.
+
+- Lit toutes les lignes dont la colonne **Date P1** est vide
+- Relance le scoring P1 sur ces lignes (titre + entreprise + localisation)
+- Met à jour : Date P1, Score P1, Résumé P1, Go P2?
+- Ne touche pas : Date ajout, ID LinkedIn, Date offre, colonnes manuelles
+
+---
+
+### Scorer en P2 les lignes sans Date P2 (depuis le Sheets, sans Gmail)
+
+```powershell
+# Toutes les lignes GO sans P2 (score P1 >= 6 par défaut)
 python main.py --rescore-p2
 
-# Rescorer en P2 avec score P1 minimum personnalisé
-python main.py --rescore-p2 --rescore-min-score 8
+# Avec score P1 minimum personnalisé
+python main.py --rescore-p2 --rescore-min-score 5
 
-# Rescorer même les offres qui ont déjà une P2 (après correction du prompt)
+# Rescorer même les lignes qui ont déjà une P2 (après correction du prompt)
 python main.py --rescore-p2 --rescore-force --enrich-limit 0
 
 # Rescorer uniquement une offre par son ID LinkedIn (col B du Sheets)
 python main.py --rescore-id 4379033220
 ```
+
+**Quand l'utiliser :** après des erreurs 429 Claude en P2, après correction du prompt P2, ou pour scorer des offres ajoutées sans P2.
+
+- Lit les lignes du Sheets avec Score P1 >= min_score **et Date P2 vide** (sauf avec `--rescore-force`)
+- Enrichit via RapidAPI (ou cache), puis lance P2
+- Met à jour : Date P2, Score P2, Reco P2, et toutes les colonnes P2
+- Ne touche pas : colonnes A-E (P1), colonnes manuelles
+
+---
+
+### Autres commandes
+
+```powershell
+# Test sans Gmail (4 offres fictives, sans écriture Sheets)
+python main.py --test --no-sheets
+
+# Test pipeline complet sur une seule URL LinkedIn
+python main.py --test-one https://www.linkedin.com/jobs/view/4379033220/
+
+# Générer les réponses aux questions Q1/Q2/Q3 d'une offre
+python main.py --answer-questions 4379033220
+```
+
+---
 
 ## Variables d'environnement (.env)
 
@@ -86,49 +133,60 @@ python main.py --rescore-id 4379033220
 
 URL : https://docs.google.com/spreadsheets/d/1n5dLkWlhrKI23pz9prjERm_R_wsdhEcq6SJcisSVHjk
 
-### Onglet "Offres" — 34 colonnes
+### Onglet "Offres" — 43 colonnes
 
 | Col | Nom | Rempli par |
 |-----|-----|------------|
-| A | Date ajout (P1) | Code — date d'insertion |
+| A | Date ajout | Code — date d'insertion |
 | B | ID LinkedIn | Code — extrait de l'URL |
 | C | Date offre | Code — date de l'email |
-| D | Score P1 /10 | Claude P1 |
-| E | Résumé P1 | Claude P1 — raison du score (rejet ou point fort) |
-| F | Go P2? | Code — GO si score P1 >= 5 et non rejeté, NO GO sinon |
-| G | Date P2 | Code — date du scoring P2 |
-| H | Score P2 /10 | Claude P2 |
-| I | Reco P2 | Claude P2 — GO / NO GO |
-| J | Rôle | Claude P2 — sous-score rôle |
-| K | Score Entreprise | Claude P2 — sous-score entreprise |
-| L | Lieu | Claude P2 — sous-score localisation |
-| M | Score User | **Manuel** |
-| N | Reco User | **Manuel** |
-| O | Motif User | **Manuel** |
-| P | Statut | **Manuel** — Postulé / Pas intéressé / En cours |
-| Q | Comm | **Manuel** |
-| R | URL | Code |
-| S | Titre | Code |
-| T | Entreprise | Code — nom de l'entreprise |
-| U | Localisation | Code |
-| V | Dutch Required? | Claude P2 — mandatory / preferred / vide |
-| W | Salaire affiché | Code |
-| X | Salaire estimé | Claude P2 |
-| Y | Description entreprise | Claude P2 — résumé 2-3 phrases |
-| Z | Résumé | Claude P2 — analyse complète |
-| AA | Points forts | Claude P2 |
-| AB | Red flags | Claude P2 |
-| AC | Taille entreprise | Claude P2 — estimée |
-| AD | Secteur | API |
-| AE | Séniorité | API |
-| AF | Funding / Type | Claude P2 — Série A/B, Bootstrapped, Corporate… |
-| AG | Description offre | API — description complète |
-| AH | Source | Code — email LinkedIn |
+| D | Date P1 | Code — date du scoring P1 |
+| E | Score P1 /10 | Claude P1 |
+| F | Résumé P1 | Claude P1 — raison du score (rejet ou point fort) |
+| G | Go P2? | Code — GO si score P1 >= 5 et non rejeté, NO GO sinon |
+| H | Date P2 | Code — date du scoring P2 |
+| I | Score P2 /10 | Claude P2 |
+| J | Reco P2 | Claude P2 — GO / NO GO |
+| K | Rôle | Claude P2 — sous-score rôle |
+| L | Score Entreprise | Claude P2 — sous-score entreprise |
+| M | Lieu | Claude P2 — sous-score localisation |
+| N | Score User | **Manuel** |
+| O | Reco User | **Manuel** |
+| P | Motif User | **Manuel** |
+| Q | Statut | **Manuel** — Postulé / Pas intéressé / En cours |
+| R | Comm | **Manuel** |
+| S | URL | Code |
+| T | Titre | Code |
+| U | Entreprise | Code — nom de l'entreprise |
+| V | Localisation | Code |
+| W | Dutch Required? | Claude P2 — mandatory / preferred / vide |
+| X | Salaire affiché | Code |
+| Y | Salaire estimé | Claude P2 |
+| Z | Description entreprise | Claude P2 — résumé 2-3 phrases |
+| AA | Résumé | Claude P2 — analyse complète |
+| AB | Points forts | Claude P2 |
+| AC | Red flags | Claude P2 |
+| AD | Taille entreprise | Claude P2 — estimée |
+| AE | Secteur | API |
+| AF | Séniorité | API |
+| AG | Funding / Type | Claude P2 — Série A/B, Bootstrapped, Corporate… |
+| AH | Description offre | API — description complète |
+| AI | Source | Code — email LinkedIn |
+| AJ | Question 1 | **Manuel** |
+| AK | Response 1 | Code — généré par `--answer-questions` |
+| AL | Question 2 | **Manuel** |
+| AM | Response 2 | Code |
+| AN | Question 3 | **Manuel** |
+| AO | Response 3 | Code |
+| AP | Answer Questions | Code — commande CLI à copier-coller |
+| AQ | Adapt CV | **Manuel** |
 
 **Règles importantes :**
-- Colonnes A-E : figées après P1, jamais écrasées par un rescore P2
-- Colonnes M-Q : manuelles (`MANUAL_COLUMNS`), jamais écrasées par le code
-- Dédoublonnage par URL (col R) à chaque insertion
+- Colonnes A-C : figées après insertion, jamais écrasées
+- Colonnes D-F : écrasées uniquement par `--rescore-p1` (P1_START_COL)
+- Colonnes G+ : écrasées par le scoring P2 (P2_START_COL = "Go P2?")
+- Colonnes manuelles (`MANUAL_COLUMNS`) : jamais écrasées par le code — Score User, Reco User, Motif User, Statut, Comm, Question 1/2/3, Adapt CV
+- Dédoublonnage par **ID LinkedIn** (col B) à chaque insertion et avant tout scoring
 - Les offres sont triées par score décroissant à l'insertion
 
 ### Onglet "Cache API" — 3 colonnes
@@ -163,6 +221,14 @@ Voir l'offre d'emploi : https://www.linkedin.com/comm/jobs/view/ID/?...
 ```
 L'ID est extrait et l'URL canonique `linkedin.com/jobs/view/ID/` est reconstituée.
 3 expéditeurs traités : `jobalerts-noreply@linkedin.com`, `jobs-listings@linkedin.com`, `jobs-noreply@linkedin.com`.
+Gmail est paginé (maxResults=500 par page) pour ne rater aucun email sur de longues fenêtres.
+
+### Dédoublonnage
+Basé sur l'**ID LinkedIn** (col B), pas l'URL complète — robuste aux variations de paramètres de tracking.
+- Au démarrage d'un scan : les IDs existants + les IDs avec Date P2 déjà remplie sont chargés depuis le Sheets
+- Avant P1 : les offres déjà présentes sont exclues (zéro appel Claude inutile)
+- Avant P2 : les offres dont Date P2 est déjà remplie sont exclues
+- À l'écriture : doublon silencieusement ignoré
 
 ### Scoring — deux passes
 
@@ -171,6 +237,7 @@ L'ID est extrait et l'URL canonique `linkedin.com/jobs/view/ID/` est reconstitu�
 - Input : titre | entreprise | localisation | salaire
 - Output : `[{id, score, go, reason}]` — reason toujours rempli (raison rejet ou point fort du score)
 - Formule : `score = (role×5 + company×3 + location×2) / 10`
+- La détection hors-Belgique est entièrement déléguée à Claude (pas de pré-filtre Python)
 
 **Passe 2 (individuel)**
 - 1 appel Claude par offre, 5 workers en parallèle
@@ -185,9 +252,10 @@ L'ID est extrait et l'URL canonique `linkedin.com/jobs/view/ID/` est reconstitu�
 | `PRE_ENRICHMENT_THRESHOLD` | 5 | Score P1 min pour déclencher l'enrichissement API et Go P2? = GO |
 
 ### Colonnes protégées
-- `P2_START_COL = "Go P2?"` : les rescores P2 n'écrivent qu'à partir de la col F
-- `MANUAL_COLUMNS = {Score User, Reco User, Motif User, Statut, Comm}` : jamais écrasées, même avec `--rescore-force`
-- `job_to_p2_updates()` : batchUpdate cellule par cellule pour respecter ces deux contraintes
+- `P1_START_COL = "Date P1"` : les rescores P1 écrivent de la col D à F inclus
+- `P2_START_COL = "Go P2?"` : les rescores P2 n'écrivent qu'à partir de la col G
+- `MANUAL_COLUMNS` : jamais écrasées, même avec `--rescore-force`
+- `job_to_p1_updates()` / `job_to_p2_updates()` : batchUpdate cellule par cellule pour respecter ces contraintes
 
 ### ScoredJob._extra
 Les champs d'enrichissement (`company_size`, `company_industry`, `seniority_level`, `company_funding`, `company_description`, `recommendation`, `dutch_required`, `p2_failed`…) transitent via `_extra` et sont fusionnés dans `to_dict()`.
@@ -208,7 +276,7 @@ Les champs d'enrichissement (`company_size`, `company_industry`, `seniority_leve
 | Problème | Cause | Solution |
 |----------|-------|----------|
 | `Rate limit 429 Claude` | 5 workers P2 sur gros volume | Les lignes avec `p2_failed=True` ne sont pas écrasées — relancer `--rescore-id ID` ou `--rescore-p2` après quelques minutes |
-| `Score P2 = 0, Résumé vide` | Erreur Claude lors du rescore, lignes vidées manuellement | Vider les colonnes F→AH de la ligne dans le Sheets, relancer `--rescore-id ID` |
+| `Score P2 = 0, Résumé vide` | Erreur Claude lors du rescore, lignes vidées manuellement | Vider les colonnes G→AP de la ligne dans le Sheets, relancer `--rescore-id ID` |
 | `429 RapidAPI` | Quota 50 appels/mois épuisé | `--enrich-limit 0` pour cache uniquement ; quota se renouvelle mensuellement |
 | `WSGITimeoutError` OAuth | Lancé en background | Lancer en foreground dans un terminal PowerShell, pas via Claude Code |
 | `charmap codec error` | Windows UTF-8 | Toujours préfixer avec `$env:PYTHONIOENCODING="utf-8"` |
@@ -229,7 +297,6 @@ Les champs d'enrichissement (`company_size`, `company_industry`, `seniority_leve
 
 - [ ] **Scheduler n8n** : trigger quotidien à 8h (`python main.py`)
 - [ ] **Sources supplémentaires** : Welcome to the Jungle, Indeed Belgique via RSS
-- [ ] **Filtre pré-Claude** : rejeter hors Belgique et rôles évidents sans appel Claude (partiellement en place avec `is_belgium()`)
 - [ ] **Notification email/Slack** : résumé des offres GO directement
 - [ ] **Tier 2 Anthropic** : passer $40 de crédits pour éviter les 429 P2 sur gros volumes
 - [ ] **API alternative** : voir `src/_fantastic_jobs_api.py` (Fantastic.Jobs, 200 crédits/mois) si RapidAPI épuisée
