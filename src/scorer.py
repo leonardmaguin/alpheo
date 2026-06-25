@@ -14,43 +14,6 @@ PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "profile.yaml")
 PRE_ENRICHMENT_THRESHOLD = 5  # score P1 min → déclenche enrichissement + P2
 ENRICHMENT_THRESHOLD = PRE_ENRICHMENT_THRESHOLD  # alias pour compatibilité
 
-# Indicateurs explicitement hors Belgique — si l'un d'eux est trouvé, l'offre est rejetée.
-# Logique inverse : on rejette le connu-étranger plutôt que d'énumérer toutes les villes belges.
-NON_BELGIUM_KEYWORDS = [
-    # Pays
-    "france", "french", "paris", "lyon", "marseille", "toulouse", "bordeaux",
-    "nantes", "lille", "strasbourg", "nice", "montpellier", "rennes",
-    "united kingdom", "royaume-uni", "uk,", " uk ", "london", "londres",
-    "manchester", "birmingham", "edinburgh", "glasgow",
-    "netherlands", "pays-bas", "amsterdam", "rotterdam", "utrecht", "eindhoven",
-    "germany", "allemagne", "berlin", "munich", "münchen", "hamburg", "frankfurt",
-    "luxembourg city", "luxembourg,",  # "luxembourg" seul peut être la province belge
-    "switzerland", "suisse", "zürich", "zurich", "geneva", "genève",
-    "spain", "espagne", "madrid", "barcelona",
-    "italy", "italie", "milan", "milano", "rome",
-    "united states", "usa", "new york", "san francisco",
-    "canada", "toronto", "montreal",
-    "israel", "tel aviv",
-    "dubai", "uae",
-    "portsmouth", "huntingdon", "gibraltar",
-    # Codes postaux français (commencent par 75, 69, 13, 31, etc.) — trop risqué, on skip
-]
-
-
-def is_belgium(location: str) -> bool:
-    """Retourne True si la localisation est vraisemblablement en Belgique.
-    Logique : on rejette si un indicateur étranger connu est détecté, sinon on accepte.
-    Cela évite de devoir lister toutes les villes/codes postaux belges.
-    """
-    if not location:
-        return True
-    loc = location.lower()
-    # Remote/hybride sans contrainte géographique : OK
-    if any(kw in loc for kw in ("remote", "télétravail", "teletravail", "hybrid", "hybride")):
-        return True
-    return not any(kw in loc for kw in NON_BELGIUM_KEYWORDS)
-
-
 # ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
@@ -164,6 +127,11 @@ RÈGLES KO DUR (go=false, score=0) :
 - Rôle dev pur / finance / RH / sales pur
 - Salaire explicitement <80k€
 
+LOCALISATION — tu es le seul juge, pas de pré-filtre Python :
+- Toute ville/commune/code postal BELGE est OK : Etterbeek, Wommelgem, Braine-l'Alleud, Bornem, Wavre, Waterloo, Leuven, Hasselt, Namur, Liège, codes postaux 1000-9999, etc.
+- KO dur uniquement si la localisation est clairement hors Belgique (France, UK, Pays-Bas, Allemagne, etc.) ET aucune mention remote/hybride
+- En cas de doute (ville ambiguë, localisation vide), NE PAS rejeter — score location=5
+
 Réponds UNIQUEMENT avec un array JSON, une ligne par offre, AUCUN texte autour.
 Ajoute TOUJOURS un champ "reason" (5-8 mots max) : cause du rejet ou raison principale du score élevé :
 [{"id":"...","score":7,"go":true,"reason":"Head of Ops, scale-up mobilité Bruxelles"},{"id":"...","score":2,"go":false,"reason":"Rôle dev pur, hors profil"},...]"""
@@ -173,39 +141,20 @@ def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str
     """
     Envoie toutes les offres en un seul appel Claude.
     Retourne un dict {job_id: {score, go}}.
+    La détection de localisation hors-Belgique est entièrement déléguée à Claude.
     """
-    # Pré-filtre localisation sans appel Claude
-    pre_filtered = {}
-    to_score = []
-    for job in jobs:
-        if not is_belgium(job.get("location", "")):
-            pre_filtered[job["id"]] = {"score": 0, "go": False,
-                                        "reject_reason": f"Localisation hors Belgique : {job.get('location')}"}
-        else:
-            to_score.append(job)
-
-    results = dict(pre_filtered)
-
-    if not to_score:
-        return results
-
-    # Construit la liste compacte : id | titre | entreprise | localisation | salaire
-    lines = "\n".join(
-        f'{j["id"]} | {j.get("title","")} | {j.get("company","")} | {j.get("location","")} | {j.get("salary","")}'
-        for j in to_score
-    )
-    user_msg = f"Évalue ces {len(to_score)} offres :\n{lines}"
+    results = {}
 
     # Découpe en batches de 50 — moins d'appels API, moins de risque de rate limit
     batch_size = 50
     all_jobs_lines = [
         f'{j["id"]} | {j.get("title","")} | {j.get("company","")} | {j.get("location","")} | {j.get("salary","")}'
-        for j in to_score
+        for j in jobs
     ]
 
     for i in range(0, len(all_jobs_lines), batch_size):
+        batch_jobs = jobs[i:i + batch_size]
         batch_lines = all_jobs_lines[i:i + batch_size]
-        batch_jobs = to_score[i:i + batch_size]
         user_msg = f"Évalue ces {len(batch_lines)} offres :\n" + "\n".join(batch_lines)
         if i > 0:
             import time as _time
