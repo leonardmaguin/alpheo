@@ -177,9 +177,8 @@ def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str
                 }
         except Exception as e:
             print(f"[Scorer/P1] Erreur batch ({i}-{i+batch_size}): {e}")
-            # En cas d'erreur, marque toutes les offres du batch comme GO avec score 5
             for job in batch_jobs:
-                results[job["id"]] = {"score": 5, "go": True, "error": str(e)}
+                results[job["id"]] = {"score": 0, "go": False, "p1_failed": True, "error": str(e)}
 
     return results
 
@@ -315,8 +314,9 @@ def score_pass1(jobs: list[dict], verbose: bool = True) -> list[ScoredJob]:
         r = results.get(job["id"], {"score": 0, "go": False})
         scored.score_total = r.get("score", 0)
         scored.hard_reject = not r.get("go", False)
+        if r.get("p1_failed"):
+            scored._extra["p1_failed"] = True
         if scored.hard_reject:
-            # Préfère la raison du pré-filtre localisation (déjà dans r), sinon celle de Claude
             scored.reject_reason = r.get("reject_reason") or r.get("reason") or "Score P1 trop bas"
         else:
             scored.reject_reason = ""

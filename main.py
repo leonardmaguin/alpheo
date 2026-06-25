@@ -134,8 +134,13 @@ def run_rescore_p1():
     # (évite le 429 Sheets : 60 write requests/min si on fait 1 requête par ligne)
     all_updates = []
     log_lines = []
+    failed = 0
     for job in scored:
         d = job.to_dict()
+        if d.get("p1_failed"):
+            failed += 1
+            print(f"[Rescore P1] Erreur Claude — {d['title']} @ {d['company']} (Date P1 non écrite, sera retenté)")
+            continue
         d["score_p1"] = job.score_total
         d["date_scoring_p1"] = p1_date
         url = d.get("url", "")
@@ -162,6 +167,8 @@ def run_rescore_p1():
     for line in log_lines:
         print(line)
     print(f"\n[Rescore P1] {len(log_lines)} ligne(s) mises à jour.")
+    if failed:
+        print(f"[Rescore P1] {failed} offre(s) non scorées (erreur Claude) — relancer --rescore-p1 pour les retenter.")
 
 
 def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False, only_id: str = ""):
