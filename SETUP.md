@@ -99,18 +99,44 @@ Un fichier `token.json` sera créé — il ne faudra plus se ré-authentifier.
 
 ## Utilisation quotidienne
 
+Toujours préfixer avec :
+```powershell
+$env:PYTHONIOENCODING="utf-8"
+```
+
+### Collecter de nouvelles offres
+
 ```powershell
 # Scan standard des dernières 24h
 python main.py
 
-# Scan des 3 derniers jours (rattrapage)
-python main.py --days 3
+# Rattrapage sur N jours (ex : depuis le 25 juin = 9 jours)
+python main.py --days 9
 
-# Sans enrichissement (plus rapide, économise des crédits Firecrawl)
+# Fenêtre glissante : de J-15 à J-8 (7 jours, en sautant les 8 derniers)
+python main.py --from-day 8 --days 7
+
+# Sans enrichissement RapidAPI (plus rapide, économise des crédits)
 python main.py --no-enrich
 
 # Sauvegarder aussi en JSON
 python main.py --output-json results.json
+```
+
+### Rescorer depuis le Sheets (sans Gmail)
+
+```powershell
+# Rescorer toutes les lignes dont Date P1 est vide
+python main.py --rescore-p1
+
+# Rescorer toutes les lignes Go P2? = GO dont Date P2 est vide (score P1 >= 6 par défaut)
+python main.py --rescore-p2
+
+# Rescorer P2 avec un seuil P1 minimum personnalisé
+python main.py --rescore-p2 --rescore-min-score 5
+
+# Rescorer une offre précise par son ID LinkedIn (col B du Sheets)
+python main.py --rescore-id 4379033220
 ```
 
 ---
