@@ -134,9 +134,9 @@ def parse_jobs_from_text(text: str, email_id: str) -> list[JobOffer]:
         if not lines:
             continue
 
-        # Cherche l'URL LinkedIn jobs dans le bloc
+        # Cherche l'URL LinkedIn jobs dans le bloc (comm/jobs/view ou jobs/view, avec ou sans slash final)
         url_match = re.search(
-            r'https://www\.linkedin\.com/comm/jobs/view/(\d+)/[^\s]*',
+            r'https://www\.linkedin\.com/(?:comm/)?jobs/view/(\d+)[/?\s]',
             block
         )
         if not url_match:
@@ -152,8 +152,9 @@ def parse_jobs_from_text(text: str, email_id: str) -> list[JobOffer]:
         # Les lignes avant "Voir l'offre" contiennent titre, entreprise, localisation
         # Filtre les lignes parasites (entête email LinkedIn)
         skip_patterns = re.compile(
-            r"votre alerte|nouvelle.{0,10}offre|correspond|préférence|"
-            r"démarquez|recruteur|linkedin\.com|voir (toutes|l'offre)|see all",
+            r"votre alerte|votre offre.{0,30}(enregistr|rappel)|nouvelle.{0,10}offre|correspond|préférence|"
+            r"démarquez|recruteur|linkedin\.com|voir (toutes|l'offre)|see all|postuler maintenant|"
+            r"relations?\s*$|\d+\s+relations?",
             re.IGNORECASE
         )
         info_lines = []
