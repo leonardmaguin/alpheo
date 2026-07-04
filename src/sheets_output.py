@@ -283,7 +283,7 @@ def job_to_p1_updates(job: dict, row_num: int) -> list[dict]:
     p1_start_idx = COLUMNS.index(P1_START_COL)
     p2_start_idx = COLUMNS.index(P2_START_COL)
     updates = []
-    for i in range(p1_start_idx, p2_start_idx):
+    for i in range(p1_start_idx, p2_start_idx + 1):
         if COLUMNS[i] in MANUAL_COLUMNS:
             continue
         col = _col_letter(i)
