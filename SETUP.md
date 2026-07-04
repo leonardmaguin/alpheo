@@ -110,11 +110,15 @@ $env:PYTHONIOENCODING="utf-8"
 # Scan standard des dernières 24h
 python main.py
 
-# Rattrapage sur N jours (ex : depuis le 25 juin = 9 jours)
+# Rattrapage sur N jours (ex : les 9 derniers jours)
 python main.py --days 9
 
 # Fenêtre glissante : de J-15 à J-8 (7 jours, en sautant les 8 derniers)
 python main.py --from-day 8 --days 7
+
+# P1 uniquement : collecte + scoring P1 + écriture Sheets, sans RapidAPI ni P2
+# Affiche combien d'offres iraient en P2 — utile avant de consommer des crédits API
+python main.py --days 9 --p1-only
 
 # Sans enrichissement RapidAPI (plus rapide, économise des crédits)
 python main.py --no-enrich

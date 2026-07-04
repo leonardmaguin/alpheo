@@ -428,6 +428,8 @@ def main():
                         help="Rescore uniquement l'offre avec cet ID LinkedIn (implique --rescore-force)")
     parser.add_argument("--rescore-p1", action="store_true",
                         help="Score en P1 toutes les lignes du Sheets dont Date P1 est vide (sans collecter les emails)")
+    parser.add_argument("--p1-only", action="store_true",
+                        help="Collecte + P1 + écriture Sheets, sans enrichissement RapidAPI ni P2")
     parser.add_argument("--answer-questions", type=str, default="", metavar="LINKEDIN_ID",
                         help="Lit les questions Q1/Q2/Q3 du Sheets et génère les réponses avec Claude Sonnet")
     args = parser.parse_args()
@@ -518,7 +520,24 @@ def main():
     print(f"     → {len(to_enrich)} offre(s) retenues pour enrichissement (score P1 >= {PRE_ENRICHMENT_THRESHOLD})")
     print(f"     → {len(low_score)} offre(s) score trop bas, {len(hard_rejected)} rejetées définitivement")
 
-    # --- ÉTAPE 2b : Enrichissement API (description complète) ---
+    def _with_p1(scored_job):
+        d = scored_job.to_dict()
+        d["score_p1"] = scored_job.score_total
+        d["date_scoring_p1"] = p1_date
+        return d
+
+    # --- ÉTAPE 2b : --p1-only : écriture Sheets P1 + résumé, sans enrichissement ni P2 ---
+    if args.p1_only:
+        all_p1_dicts = [_with_p1(j) for j in scored_p1]
+        if not args.no_sheets:
+            print(f"\n[3/4] Export vers Google Sheets (P1 uniquement)...")
+            sheets_url = write_jobs_to_sheets(all_p1_dicts, spreadsheet_id=SPREADSHEET_ID)
+            print(f"     → {sheets_url}")
+        print(f"\n[Résumé P1-only] {len(to_enrich)} offre(s) iraient en P2 si tu relances sans --p1-only :")
+        for j in sorted(to_enrich, key=lambda x: x.score_total, reverse=True):
+            print(f"  {j.score_total}/10 — {j.title} @ {j.company}")
+        return
+
     # Sauvegarde le score P1 avant que la passe 2 ne l'écrase
     to_enrich_dicts = []
     for j in to_enrich:
@@ -580,13 +599,6 @@ def main():
         final_scored.append(j)
 
     # Rassemble tout pour le Sheets
-    # Pour les offres non enrichies, score_p1 = score_total (passe 1 est le score final)
-    def _with_p1(scored_job):
-        d = scored_job.to_dict()
-        d["score_p1"] = scored_job.score_total
-        d["date_scoring_p1"] = p1_date
-        return d
-
     all_jobs_dict = (
         final_scored
         + [_with_p1(j) for j in low_score]
