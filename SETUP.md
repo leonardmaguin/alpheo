@@ -130,14 +130,33 @@ python main.py --output-json results.json
 python main.py --rescore-p1
 
 # Rescorer toutes les lignes Go P2? = GO dont Date P2 est vide (score P1 >= 6 par défaut)
+# Enrichissement RapidAPI inclus (utilise le cache si déjà enrichi, sinon appel API)
 python main.py --rescore-p2
+
+# Même chose sans appel RapidAPI (cache uniquement — 0 crédit consommé)
+python main.py --rescore-p2 --enrich-limit 0
 
 # Rescorer P2 avec un seuil P1 minimum personnalisé
 python main.py --rescore-p2 --rescore-min-score 5
 
+# Rescorer P2 même les lignes qui ont déjà une Date P2 (après correction du prompt)
+python main.py --rescore-p2 --rescore-force --enrich-limit 0
+
 # Rescorer une offre précise par son ID LinkedIn (col B du Sheets)
 python main.py --rescore-id 4379033220
 ```
+
+### Enrichissement RapidAPI
+
+Il n'existe pas de commande d'enrichissement seul. L'enrichissement se fait :
+- Automatiquement lors d'un scan (`python main.py`) pour les offres score P1 >= 5
+- Lors d'un `--rescore-p2` pour les offres Go P2? = GO sans Date P2
+
+Le cache (onglet "Cache API" du Sheets) évite les re-requêtes : si l'URL est déjà dans
+le cache, aucun crédit RapidAPI n'est consommé. Une offre absente du cache mais avec
+"Description offre" vide n'est pas un indicateur fiable — l'enrichissement peut avoir
+échoué (offre expirée, quota épuisé). Utilise `--enrich-limit 0` pour forcer le cache
+uniquement, ou `--enrich-limit N` pour limiter les appels API réels.
 
 ---
 
