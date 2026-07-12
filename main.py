@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
-from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p1_updates, job_to_p2_updates, _col_letter, _linkedin_id, get_sheets_job_state
+from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_create_spreadsheet, COLUMNS, TAB_NAME, job_to_row, job_to_p1_updates, job_to_p2_updates, _col_letter, _linkedin_id, get_sheets_job_state, write_adapt_cv_prompt
 
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
@@ -405,6 +405,144 @@ def run_answer_questions(linkedin_id: str):
             print(f"  → {r}")
 
 
+def run_adapt_cv(linkedin_id: str):
+    """
+    Lit le contexte de l'offre depuis le Sheets + profile_memo.md,
+    compose un prompt d'adaptation CV prêt à coller dans l'interface Claude avec Master Resume.docx,
+    et l'écrit dans l'onglet 'Adapt CV' du Sheets.
+    """
+    service = get_sheets_service()
+    sid = get_or_create_spreadsheet(service, SPREADSHEET_ID)
+
+    print(f"\n[Adapt CV] Lecture du Sheets pour ID LinkedIn = {linkedin_id}...")
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sid, range=f"{TAB_NAME}!A2:{_col_letter(len(COLUMNS)-1)}5000"
+    ).execute()
+    rows = result.get("values", [])
+
+    def col(name):
+        idx = COLUMNS.index(name)
+        return lambda row: row[idx] if idx < len(row) else ""
+
+    get_url        = col("URL")
+    get_title      = col("Titre")
+    get_company    = col("Entreprise")
+    get_location   = col("Localisation")
+    get_salary     = col("Salaire affiché")
+    get_salary_est = col("Salaire estimé")
+    get_size       = col("Taille entreprise")
+    get_industry   = col("Secteur")
+    get_seniority  = col("Séniorité")
+    get_funding    = col("Funding / Type")
+    get_co_desc    = col("Description entreprise")
+    get_desc       = col("Description offre")
+    get_summary    = col("Résumé")
+    get_strengths  = col("Points forts")
+    get_red_flags  = col("Red flags")
+    get_dutch      = col("Dutch Required?")
+    get_score_p2   = col("Score P2 /10")
+    get_reco       = col("Reco P2")
+
+    target_row = None
+    target_data = None
+    for i, row in enumerate(rows):
+        if _linkedin_id(get_url(row)) == linkedin_id:
+            target_row = i + 2
+            target_data = row
+            break
+
+    if not target_row:
+        print(f"[Adapt CV] ID LinkedIn {linkedin_id} introuvable dans le Sheets.")
+        return
+
+    title    = get_title(target_data)
+    company  = get_company(target_data)
+    location = get_location(target_data)
+
+    print(f"[Adapt CV] Offre trouvée : {title} @ {company} (ligne {target_row})")
+
+    # Lecture du profile_memo.md
+    memo_path = Path(__file__).parent / "profile_memo.md"
+    profile_memo = memo_path.read_text(encoding="utf-8") if memo_path.exists() else ""
+
+    # Composition du prompt
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    prompt = f"""Tu es un expert en recrutement et en rédaction de CV.
+Je t'envoie mon CV (Master Resume.docx en pièce jointe) et le contexte d'une offre d'emploi.
+Adapte mon CV à cette offre en :
+1. Reformulant le titre et l'accroche pour matcher le rôle et l'entreprise
+2. Réordonnant et reformulant les bullet points de chaque expérience pour mettre en avant ce qui est le plus pertinent pour ce poste
+3. Gardant strictement la même mise en page, les mêmes sections, le même nombre de pages
+
+CONTRAINTES ABSOLUES :
+- Ne pas inventer de faits ou d'expériences non présentes dans le CV original
+- Garder exactement la même structure et mise en page (1 page)
+- Ne pas supprimer d'expériences, seulement les reformuler / réordonner les bullets
+- Retourner un fichier Word (.docx) modifié, pas du texte brut
+- Ne pas mentionner les éléments marqués "NE PAS CITER EN CANDIDATURE" dans profile_memo
+
+---
+
+## OFFRE D'EMPLOI
+
+**Poste :** {title}
+**Entreprise :** {company}
+**Localisation :** {location}
+**Salaire affiché :** {get_salary(target_data) or "Non précisé"}
+**Salaire estimé :** {get_salary_est(target_data) or "Non précisé"}
+**Séniorité :** {get_seniority(target_data) or "Non précisé"}
+**Taille entreprise :** {get_size(target_data) or "Non précisé"}
+**Secteur :** {get_industry(target_data) or "Non précisé"}
+**Funding / Type :** {get_funding(target_data) or "Non précisé"}
+**Dutch required :** {get_dutch(target_data) or "Non mentionné"}
+**Score P2 :** {get_score_p2(target_data) or "N/A"}/10 — {get_reco(target_data) or ""}
+
+**Description entreprise :**
+{get_co_desc(target_data) or "Non disponible"}
+
+**Description complète du poste :**
+{get_desc(target_data) or "Non disponible"}
+
+**Analyse P2 — Résumé :**
+{get_summary(target_data) or "Non disponible"}
+
+**Points forts :**
+{get_strengths(target_data) or "Non disponible"}
+
+**Red flags :**
+{get_red_flags(target_data) or "Aucun"}
+
+---
+
+## MON PROFIL (contexte interne — ne pas citer directement)
+
+{profile_memo}
+
+---
+
+Génère le CV adapté en .docx en respectant strictement les contraintes ci-dessus.
+"""
+
+    label = f"{company} — {title}"
+    sheets_url = write_adapt_cv_prompt(service, sid, linkedin_id, label, prompt)
+
+    # Met à jour la colonne "Adapt CV" dans l'onglet Offres avec la date
+    adapt_cv_col = _col_letter(COLUMNS.index("Adapt CV"))
+    adapted_cv_col = _col_letter(COLUMNS.index("Adapted CV"))
+    service.spreadsheets().values().batchUpdate(
+        spreadsheetId=sid,
+        body={"valueInputOption": "RAW", "data": [
+            {"range": f"{TAB_NAME}!{adapt_cv_col}{target_row}", "values": [[now]]},
+            {"range": f"{TAB_NAME}!{adapted_cv_col}{target_row}", "values": [[f"Voir onglet 'Adapt CV' — {label}"]]},
+        ]},
+    ).execute()
+
+    print(f"[Adapt CV] Prompt écrit dans l'onglet 'Adapt CV' du Sheets.")
+    print(f"[Adapt CV] Ouvre le Sheets, va dans l'onglet 'Adapt CV', copie le prompt de la ligne '{label}',")
+    print(f"           colle-le dans l'interface Claude avec Master Resume.docx en pièce jointe.")
+    print(f"[Adapt CV] {sheets_url}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Job Scanner — trouve les offres qui te correspondent")
     parser.add_argument("--days", type=int, default=1, help="Nombre de jours à couvrir (défaut: 1)")
@@ -432,6 +570,8 @@ def main():
                         help="Collecte + P1 + écriture Sheets, sans enrichissement RapidAPI ni P2")
     parser.add_argument("--answer-questions", type=str, default="", metavar="LINKEDIN_ID",
                         help="Lit les questions Q1/Q2/Q3 du Sheets et génère les réponses avec Claude Sonnet")
+    parser.add_argument("--adapt-cv", type=str, default="", metavar="LINKEDIN_ID",
+                        help="Compose un prompt d'adaptation CV pour l'offre donnée et l'écrit dans l'onglet 'Adapt CV'")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -440,6 +580,10 @@ def main():
 
     if args.answer_questions:
         run_answer_questions(args.answer_questions)
+        return
+
+    if args.adapt_cv:
+        run_adapt_cv(args.adapt_cv)
         return
 
     if args.rescore_p1:

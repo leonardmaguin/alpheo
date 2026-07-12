@@ -64,8 +64,12 @@ COLUMNS = [
     "Question 3",
     "Response 3",
     "Answer Questions",     # commande CLI pour déclencher les réponses aux questions
-    "Adapt CV",             # manuel
+    "Adapt CV",             # date de génération du prompt (rempli par --adapt-cv)
+    "Adapted CV",           # lien vers l'onglet Adapt CV (rempli par --adapt-cv)
 ]
+
+ADAPT_CV_TAB = "Adapt CV"
+ADAPT_CV_COLUMNS = ["ID LinkedIn", "Entreprise — Titre", "Prompt"]
 
 
 def get_sheets_service():
@@ -345,3 +349,68 @@ def write_jobs_to_sheets(jobs: list[dict], spreadsheet_id: str = "") -> str:
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
     print(f"[Sheets] {url}")
     return url
+
+
+def ensure_adapt_cv_tab(service, spreadsheet_id: str) -> int:
+    """Crée l'onglet 'Adapt CV' s'il n'existe pas. Retourne son sheetId."""
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    for sheet in meta["sheets"]:
+        if sheet["properties"]["title"] == ADAPT_CV_TAB:
+            return sheet["properties"]["sheetId"]
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": ADAPT_CV_TAB}}}]},
+    ).execute()
+
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{ADAPT_CV_TAB}!A1",
+        valueInputOption="RAW",
+        body={"values": [ADAPT_CV_COLUMNS]},
+    ).execute()
+
+    meta2 = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    return next(
+        s["properties"]["sheetId"]
+        for s in meta2["sheets"]
+        if s["properties"]["title"] == ADAPT_CV_TAB
+    )
+
+
+def write_adapt_cv_prompt(service, spreadsheet_id: str, linkedin_id: str, label: str, prompt: str) -> str:
+    """
+    Écrit ou met à jour le prompt d'adaptation CV dans l'onglet 'Adapt CV'.
+    Retourne l'URL directe vers la cellule du prompt.
+    """
+    ensure_adapt_cv_tab(service, spreadsheet_id)
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{ADAPT_CV_TAB}!A2:A1000",
+    ).execute()
+    rows = result.get("values", [])
+
+    target_row = None
+    for i, row in enumerate(rows):
+        if row and row[0] == linkedin_id:
+            target_row = i + 2
+            break
+
+    if target_row:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"{ADAPT_CV_TAB}!A{target_row}",
+            valueInputOption="RAW",
+            body={"values": [[linkedin_id, label, prompt]]},
+        ).execute()
+    else:
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=f"{ADAPT_CV_TAB}!A2",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [[linkedin_id, label, prompt]]},
+        ).execute()
+
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"

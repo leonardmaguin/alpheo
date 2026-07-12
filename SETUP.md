@@ -127,6 +127,19 @@ python main.py --no-enrich
 python main.py --output-json results.json
 ```
 
+### Adapter le CV à une offre
+
+```powershell
+# Génère un prompt d'adaptation CV pour l'offre (col B du Sheets = ID LinkedIn)
+python main.py --adapt-cv 4379033220
+```
+
+Crée un prompt complet dans l'onglet "Adapt CV" du Sheets (contexte offre + profile_memo.md).
+Ensuite : ouvre l'onglet "Adapt CV", copie le prompt, colle-le dans l'interface Claude
+avec **Master Resume.docx en pièce jointe** — Claude retourne le CV adapté en .docx.
+
+---
+
 ### Rescorer depuis le Sheets (sans Gmail)
 
 ```powershell
