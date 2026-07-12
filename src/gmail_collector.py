@@ -48,8 +48,12 @@ def get_gmail_service():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception:
+                os.remove(TOKEN_PATH)
+                creds = None
+        if not creds or not creds.valid:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
         with open(TOKEN_PATH, "w") as token:
