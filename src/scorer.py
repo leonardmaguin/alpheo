@@ -107,7 +107,7 @@ def _parse_json_object(raw: str) -> dict:
 PASS1_SYSTEM = """Tu es un filtre de recrutement. Évalue chaque offre selon le profil ci-dessous.
 
 PROFIL (résumé) :
-- AI Product Builder, 14 ans XP, Bruxelles. Profil hybride Ops + Product + Tech + IA.
+- AI Product Builder expérimenté, Bruxelles. Profil hybride Ops + Product + Tech + IA.
 - Veut CONSTRUIRE lui-même : outils internes, automatisation de process, agents IA,
   ownership end-to-end. PAS un rôle de management hiérarchique ni de pure stratégie.
 - Cherche UNIQUEMENT en Belgique (max 1h Bruxelles) ou remote/hybride
@@ -240,10 +240,18 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
     strong_roles = ", ".join(profile["target_roles"]["strong_match"])
     acceptable_roles = ", ".join(profile["target_roles"]["acceptable"])
 
+    # Identité lue depuis profile.yaml (gitignoré) : aucun détail de CV en dur ici
+    ident = profile.get("identity", {})
+    candidate = ", ".join(filter(None, [
+        ident.get("title", "AI Product Builder"),
+        f"{ident['experience_years']} ans XP" if ident.get("experience_years") else "",
+        ident.get("education", ""),
+    ]))
+
     return f"""Tu es un expert en recrutement senior. Analyse en détail cette offre selon le profil ci-dessous.
 
 ## PROFIL
-- AI Product Builder, 14 ans XP, École Centrale Paris
+- {candidate}
 - Positionnement : profil hybride Ops + Product + Tech + IA. Part d'un problème métier
   concret, fait la discovery avec les utilisateurs internes, construit l'outil lui-même
   (Claude Code, Python, API, SQL, automatisation) et le met en production.

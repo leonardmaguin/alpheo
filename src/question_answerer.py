@@ -27,20 +27,42 @@ def build_answer_prompt(job: dict, active_questions: list[tuple[int, str]], prof
     """
     active_questions: list of (original_index, question_text) for non-empty questions only.
     """
-    strong_roles = ", ".join(profile["target_roles"]["strong_match"])
-    skills_high = ", ".join(profile["skills_valued"]["high"])
+    def _flatten(items) -> str:
+        """Aplatit une liste YAML. Une entrée non quotée contenant ':' est lue
+        comme un dict par PyYAML ('a : b' -> {'a': 'b'}) : on la reformate au
+        lieu de planter sur le join."""
+        out = []
+        for x in items:
+            if isinstance(x, dict):
+                out += [f"{k} : {v}" for k, v in x.items()]
+            else:
+                out.append(str(x))
+        return ", ".join(out)
+
+    strong_roles = _flatten(profile["target_roles"]["strong_match"])
+    skills_high = _flatten(profile["skills_valued"]["high"])
 
     if memo:
         profile_section = f"""## PROFIL DU CANDIDAT
 {memo}"""
     else:
-        profile_section = f"""## PROFIL DU CANDIDAT
-- Titre : Senior Ops & Product Builder, 14 ans d'expérience
-- École Centrale Paris
-- Localisation : Bruxelles, Belgique
+        # Identité et langues lues depuis profile.yaml (gitignoré) :
+        # aucun détail de CV en dur dans le code versionné.
+        ident = profile.get("identity", {})
+        identity_lines = [f"- Titre : {ident.get('title', 'AI Product Builder')}"]
+        if ident.get("experience_years"):
+            identity_lines[0] += f", {ident['experience_years']} ans d'expérience"
+        if ident.get("education"):
+            identity_lines.append(f"- {ident['education']}")
+        identity_lines.append(f"- Localisation : {ident.get('location', 'Bruxelles, Belgique')}")
+
+        langs = profile.get("languages", {})
+        lang_str = ", ".join(f"{k.capitalize()} ({v})" for k, v in langs.items() if v)
+
+        profile_section = "## PROFIL DU CANDIDAT\n" + "\n".join(identity_lines) + f"""
 - Rôles idéaux : {strong_roles}
 - Compétences clés : {skills_high}
-- Langues : Français (natif), Anglais (C2), Allemand (B1), Portugais (B1)"""
+- Langues : {lang_str}"""
 
     questions_block = "\n".join(
         f"Question {i+1}: {q}" for i, q in active_questions

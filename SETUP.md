@@ -23,7 +23,7 @@ job-scanner/
 ## Étape 1 — Installer les dépendances Python
 
 ```powershell
-cd C:\Users\leona\Documents\Alphalyr\Alpheo\job-scanner
+cd C:\chemin\vers\Alpheo
 pip install -r requirements.txt
 ```
 
@@ -53,13 +53,13 @@ pip install -r requirements.txt
 2. Type : **Desktop application**
 3. Nom : `job-scanner`
 4. Télécharge le JSON → renomme-le `credentials.json`
-5. Place-le dans `C:\Users\leona\Documents\Alphalyr\Alpheo\job-scanner\`
+5. Place-le dans `C:\chemin\vers\Alpheo\`
 
 ### 3c. Configurer l'écran de consentement OAuth
 
 1. "APIs & Services" → "OAuth consent screen"
 2. User type : **External**
-3. Ajoute ton email `leonard.maguin@gmail.com` dans "Test users"
+3. Ajoute ton email `ton.email@gmail.com` dans "Test users"
 
 ---
 
@@ -185,7 +185,7 @@ Pour lancer le script automatiquement chaque matin :
 2. **Trigger** : Schedule (tous les jours à 8h00)
 3. **Action** : Execute Command
    ```
-   python C:\Users\leona\Documents\Alphalyr\Alpheo\job-scanner\main.py
+   python C:\chemin\vers\Alpheo\main.py
    ```
 
 ---
