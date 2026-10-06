@@ -11,6 +11,7 @@ import re
 import json
 import time
 import requests
+from timeutil import now_stamp
 
 JOBS_API_HOST = "jobs-api14.p.rapidapi.com"
 JOBS_API_BASE = "https://jobs-api14.p.rapidapi.com"
@@ -74,7 +75,7 @@ def save_to_cache(sheets_service, spreadsheet_id: str, linkedin_url: str, enrich
         return
     try:
         from datetime import datetime, timezone
-        row = [datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"), linkedin_url, json.dumps(enriched, ensure_ascii=False)]
+        row = [now_stamp(), linkedin_url, json.dumps(enriched, ensure_ascii=False)]
         sheets_service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id,
             range=f"{CACHE_TAB}!A2",

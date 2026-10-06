@@ -25,6 +25,7 @@ if sys.platform == "win32":
 load_dotenv(Path(__file__).parent / ".env")
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from timeutil import now_stamp
 from gmail_collector import collect_jobs_from_gmail
 from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD, ENRICHMENT_THRESHOLD
 from job_api import enrich_jobs_with_api
@@ -126,7 +127,7 @@ def run_rescore_p1():
 
     from scorer import score_all_jobs, PRE_ENRICHMENT_THRESHOLD
     scored = score_all_jobs(to_rescore, verbose=True, pass2=False)
-    p1_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    p1_date = now_stamp()
 
     url_to_row = {j["url"]: j["sheet_row"] for j in to_rescore}
 
@@ -277,7 +278,7 @@ def run_rescore_p2(min_score: int, enrich_limit: int = None, force: bool = False
     print(f"\n[Rescore P2] Scoring P2 sur {len(has_desc)} offre(s)...")
     from scorer import score_pass2
     rescored = score_pass2(has_desc, verbose=True)
-    p2_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    p2_date = now_stamp()
 
     # Index url → sheet_row pour mise à jour
     url_to_row = {j["url"]: j["sheet_row"] for j in to_rescore}
@@ -466,7 +467,7 @@ def run_adapt_cv(linkedin_id: str):
     profile_memo = memo_path.read_text(encoding="utf-8") if memo_path.exists() else ""
 
     # Composition du prompt
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    now = now_stamp()
     prompt = f"""Tu es un expert en recrutement et en rédaction de CV.
 Je t'envoie mon CV (Master Resume.docx en pièce jointe) et le contexte d'une offre d'emploi.
 Adapte mon CV à cette offre en :
@@ -653,7 +654,7 @@ def main():
 
     # --- ÉTAPE 2a : Scoring passe 1 (sans description) ---
     print(f"\n[2/4] Scoring passe 1 ({len(new_jobs)} nouvelle(s) offre(s))...")
-    p1_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    p1_date = now_stamp()
     scored_p1 = score_all_jobs(new_jobs, verbose=True, pass2=False)
 
     # Offres à enrichir : non-rejetées avec score passe 1 >= seuil pré-enrichissement
@@ -725,7 +726,7 @@ def main():
     if has_description:
         print(f"\n[3b/4] Scoring passe 2 ({len(has_description)} offres avec description)...")
         rescored = score_all_jobs(has_description, verbose=True, pass2=True)
-        p2_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        p2_date = now_stamp()
         for j in rescored:
             d = j.to_dict()
             if d.get("p2_failed"):

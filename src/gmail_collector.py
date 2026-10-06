@@ -17,6 +17,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from timeutil import to_local_date
+
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/spreadsheets",
@@ -265,7 +267,10 @@ def collect_jobs_from_gmail(days_back: int = 1, skip_days: int = 0) -> list[JobO
         # Injecte la date de l'email dans chaque offre
         internal_date_ms = int(email.get("internalDate", 0))
         if internal_date_ms:
-            email_date = datetime.fromtimestamp(internal_date_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            # Date locale : un email reçu à 23h30 à Paris tombait la veille en UTC
+            email_date = to_local_date(
+                datetime.fromtimestamp(internal_date_ms / 1000, tz=timezone.utc)
+            )
         else:
             email_date = ""
         for job in jobs:
