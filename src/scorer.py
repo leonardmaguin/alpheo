@@ -107,25 +107,51 @@ def _parse_json_object(raw: str) -> dict:
 PASS1_SYSTEM = """Tu es un filtre de recrutement. Évalue chaque offre selon le profil ci-dessous.
 
 PROFIL (résumé) :
-- Senior Ops & Product Builder, 14 ans XP, Bruxelles
+- AI Product Builder, 14 ans XP, Bruxelles. Profil hybride Ops + Product + Tech + IA.
+- Veut CONSTRUIRE lui-même : outils internes, automatisation de process, agents IA,
+  ownership end-to-end. PAS un rôle de management hiérarchique ni de pure stratégie.
 - Cherche UNIQUEMENT en Belgique (max 1h Bruxelles) ou remote/hybride
-- Rôles OK : Head of Ops, COO, GM, Chief of Staff, Head of Product, Head of IT, Director Ops, Country Manager (ops), Data/AI Lead (hands-on), IT PM, Head of Customer Success (avec équipe + ownership ops), Head of Account Management (scope stratégique/ops)
-- Rôles KO : dev pur, finance, RH, sales pur, account manager individuel sans équipe, junior
-- Entreprises OK : startup/scale-up tech, SaaS, marketplace, mobilité, énergie, retail tech, IA
-- Entreprises KO : grand corporate, banque, pharma, immobilier
-- Salaire min : 90k€ (rejeter si explicitement <80k€)
+
+RÔLES IDÉAUX (role 9-10) :
+Product Builder, AI Product Builder, Ops & Product Builder, Internal Product Engineer,
+Internal Tools Engineer, AI Automation Engineer, Business/Process Automation,
+AI Ops / AI Operations, AI Engineer (applicatif produit, pas R&D), AI Solutions Engineer,
+Product Engineer, Technical Product Manager, AI Product Manager, Forward Deployed Engineer
+
+RÔLES ACCEPTABLES (role 6-8) :
+Business Operations / BizOps / Strategic Operations, Product Operations, RevOps,
+Data & AI Lead, Analytics Engineer, Chief of Staff, IT Project Manager,
+Digital Transformation Lead, Senior Product Manager, Head of Ops / Head of Product
+en PETITE structure (<100 pers., rôle encore hands-on)
+
+RÔLES FAIBLES (role 3-5) :
+Head of / Director / VP / COO dans une structure visiblement grande (management lourd,
+peu de build), Ops Manager classique, Program Manager corporate
+
+RÔLES KO (role 0-2) :
+dev logiciel classique sans angle produit/ops, Data Scientist / ML Engineer / MLOps pur,
+DevOps / SRE / infra pur, finance, RH, sales pur, account manager individuel,
+consultant en régie / ESN, junior (<3 ans)
+
+- Entreprises OK : startup/scale-up tech, SaaS, fintech, marketplace, mobilité, énergie, retail tech, IA
+- Entreprises KO : grand corporate, banque, assurance, pharma, immobilier, ESN/agence de recrutement
+- Salaire min souhaité : 80k€ (rejeter si explicitement <70k€)
 
 RÈGLES DE SCORE (0-10) :
 - score = (role×5 + company×3 + location×2) / 10, arrondi
-- role: 9-10=idéal, 7-8=acceptable, 4-6=flou/possible, 0-3=KO
 - company: 9-10=startup tech claire, 7=scale-up/mid-tech, 4-6=corporate avec angle tech, 1-3=corporate/banque/pharma
 - location: 10=Bruxelles/hybride, 7=Belgique <1h, 5=full-remote, 0=hors Belgique sans remote
 - go=true si score>=4 ET pas de KO dur
 
+IMPORTANT — en P1 tu ne vois que le titre : en cas de doute sur un titre ambigu
+(ex: "Business Operations Manager", "Product Engineer", "Solutions Engineer",
+"AI Engineer"), NE PAS rejeter. Mets role=6 et laisse la passe 2 trancher sur
+la description. L'absence de "Head of" dans le titre n'est PAS un défaut.
+
 RÈGLES KO DUR (go=false, score=0) :
 - Hors Belgique sans mention remote/hybride/full-remote
-- Rôle dev pur / finance / RH / sales pur
-- Salaire explicitement <80k€
+- Rôle clairement KO (dev classique, ML pur, infra pure, finance, RH, sales pur)
+- Salaire explicitement <70k€
 
 LOCALISATION — tu es le seul juge, pas de pré-filtre Python :
 - Toute ville/commune/code postal BELGE est OK : Etterbeek, Wommelgem, Braine-l'Alleud, Bornem, Wavre, Waterloo, Leuven, Hasselt, Namur, Liège, codes postaux 1000-9999, etc.
@@ -160,25 +186,48 @@ def score_pass1_batch(jobs: list[dict], client: anthropic.Anthropic) -> dict[str
             import time as _time
             _time.sleep(3)
 
-        try:
-            message = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=len(batch_lines) * 40 + 50,  # ~40 tokens par offre (inclut reason)
-                system=PASS1_SYSTEM,
-                messages=[{"role": "user", "content": user_msg}]
-            )
-            raw = message.content[0].text.strip()
-            parsed = _parse_json_array(raw)
-            for item in parsed:
-                results[item["id"]] = {
-                    "score": item.get("score", 0),
-                    "go": item.get("go", False),
-                    "reason": item.get("reason", ""),
-                }
-        except Exception as e:
-            print(f"[Scorer/P1] Erreur batch ({i}-{i+batch_size}): {e}")
+        # Un batch perdu = 50 offres marquées à tort comme rejetées : on réessaie
+        # (réponse vide, JSON tronqué, 429…) avant d'abandonner.
+        last_err = None
+        for attempt in range(3):
+            try:
+                message = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=len(batch_lines) * 40 + 50,  # ~40 tokens par offre (inclut reason)
+                    system=PASS1_SYSTEM,
+                    messages=[{"role": "user", "content": user_msg}]
+                )
+                raw = message.content[0].text.strip()
+                if not raw:
+                    raise ValueError("réponse vide de Claude")
+                parsed = _parse_json_array(raw)
+                for item in parsed:
+                    results[item["id"]] = {
+                        "score": item.get("score", 0),
+                        "go": item.get("go", False),
+                        "reason": item.get("reason", ""),
+                    }
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    print(f"[Scorer/P1] Batch ({i}-{i+batch_size}) échec ({e}) — retry {attempt + 1}/2")
+                    import time as _t
+                    _t.sleep(5 * (attempt + 1))
+
+        if last_err is not None:
+            print(f"[Scorer/P1] Erreur batch ({i}-{i+batch_size}) après 3 tentatives: {last_err}")
             for job in batch_jobs:
-                results[job["id"]] = {"score": 0, "go": False, "p1_failed": True, "error": str(e)}
+                results[job["id"]] = {"score": 0, "go": False, "p1_failed": True, "error": str(last_err)}
+
+        # Offres absentes de la réponse (Claude en a oublié) : à reprendre, pas à rejeter
+        for job in batch_jobs:
+            if job["id"] not in results:
+                results[job["id"]] = {
+                    "score": 0, "go": False, "p1_failed": True,
+                    "error": "offre absente de la réponse Claude",
+                }
 
     return results
 
@@ -194,15 +243,44 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
     return f"""Tu es un expert en recrutement senior. Analyse en détail cette offre selon le profil ci-dessous.
 
 ## PROFIL
-- Senior Ops & Product Builder, 14 ans XP, École Centrale Paris
+- AI Product Builder, 14 ans XP, École Centrale Paris
+- Positionnement : profil hybride Ops + Product + Tech + IA. Part d'un problème métier
+  concret, fait la discovery avec les utilisateurs internes, construit l'outil lui-même
+  (Claude Code, Python, API, SQL, automatisation) et le met en production.
+- Ce qu'il VEUT : livrer lui-même, ownership end-to-end, autonomie, petite équipe.
+- Ce qu'il NE VEUT PLUS : management hiérarchique lourd, direction, pure stratégie,
+  reporting sans build.
 - Localisation : Bruxelles. Cherche en Belgique (max 1h) ou remote/hybride.
 - Rôles idéaux : {strong_roles}
 - Rôles acceptables : {acceptable_roles}
-- Rôles KO : dev pur, finance, RH, sales pur, account manager individuel sans équipe, junior
-- Entreprises cibles : startups/scale-ups tech 20-300 pers., SaaS, marketplace, e-commerce, mobilité, énergie, retail tech, IA
-- Salaire min : {profile["compensation"]["min_gross_annual_eur"]}€ brut/an
-- Compétences : Agentic AI (Claude/MCP), Ops management, SQL/DBT, process automation, product, ERP
+- Rôles KO : dev logiciel classique sans ownership, Data Scientist / ML / MLOps pur,
+  DevOps / SRE / infra pur, finance, RH, sales pur, account manager individuel,
+  régie / ESN, junior, direction dans une structure > 300 personnes
+- Entreprises cibles : startups/scale-ups tech 20-300 pers., SaaS, fintech, marketplace, e-commerce, mobilité, énergie, retail tech, IA
+- Salaire min : {profile["compensation"]["min_gross_annual_eur"]}€ brut/an (hard reject uniquement si explicitement <70k€)
+- Compétences : Agentic AI (Claude/MCP/agents), build d'outils internes, automatisation
+  de process, Python, intégration d'API, SQL/DBT, product discovery, ops management
+- Limite connue : pas un développeur fullstack confirmé (Next.js/React/Kubernetes en
+  apprentissage, compensé par l'IA). Une offre exigeant 5+ ans de dev/ML/infra en
+  prérequis dur est un mauvais fit — le signaler en red flag.
 - Red flags : {", ".join(profile["red_flags"][:4])}
+
+## CE QUI COMPTE LE PLUS — le CONTENU du poste, pas son intitulé
+Cherche activement ces signaux dans la description. Leur présence fait MONTER score_role,
+même si le titre est générique (ex: "Business Operations Manager", "Product Engineer") :
+- outils internes / internal tools / internal product / back-office tooling
+- automatisation de process, workflow automation, n8n / Zapier / Make
+- IA appliquée au métier : agents, LLM, MCP, RAG, GenAI (intégration, pas R&D)
+- build end-to-end, prototypage, "from idea to production", shipping
+- ownership complet, autonomie, petite équipe, lab interne, intrapreneuriat
+- discovery auprès des équipes internes, contact direct avec les utilisateurs
+- connexion d'API, intégrations, data pipelines, SQL au service des ops
+
+À l'inverse, ces signaux font BAISSER score_role même si le titre est prestigieux :
+- rôle essentiellement managérial (piloter une équipe, budget, reporting) sans build
+- pure stratégie / pure analyse sans mise en production
+- prérequis techniques durs (5+ ans ML/PyTorch/Kubernetes/microservices en prod)
+- poste d'IC dans une grande équipe produit, sans périmètre ni autonomie
 
 ## OFFRE
 - Titre : {job.get("title", "")}
@@ -236,8 +314,16 @@ def build_pass2_prompt(job: dict, profile: dict) -> str:
 }}
 
 Règles de scoring :
-- hard_reject = true si : hors Belgique SANS remote, rôle KO, salaire explicite <80k€
-- score_role : 10=rôle idéal, 7-8=acceptable, 4-6=flou, 0-3=KO
+- hard_reject = true si : hors Belgique SANS remote, rôle KO, salaire explicite <70k€
+- score_role : juge le CONTENU (signaux ci-dessus) avant le titre.
+  - 9-10 = rôle de builder clair : outils internes / automatisation / IA appliquée,
+    ownership end-to-end, autonomie. Le titre peut être n'importe lequel.
+  - 7-8 = forte composante build ou automatisation, mais partielle (ex: 50% reporting,
+    ou product management avec peu de hands-on)
+  - 4-6 = rôle adjacent (ops, data, PM classique) sans signal de build explicite
+  - 0-3 = KO : management pur, dev/ML/infra pur, finance, RH, sales, régie, junior
+  - NE PAS pénaliser l'absence de management d'équipe ou de titre "Head of" :
+    un rôle d'IC senior avec ownership est exactement la cible.
 - score_company : 10=startup tech mission claire, 7=scale-up/mid-tech, 4=corporate angle tech, 1-3=grand corporate/banque/pharma
 - score_location : 10=Bruxelles/hybride, 7=Belgique <1h, 5=remote, 0=hors Belgique sans remote
 - score_total : (role×0.5 + company×0.3 + location×0.2), arrondi
@@ -270,7 +356,7 @@ def score_pass2_single(job: dict, profile: dict, client: anthropic.Anthropic) ->
         scored.score_role = result.get("score_role", 0)
         scored.score_company = result.get("score_company", 0)
         scored.score_location = result.get("score_location", 0)
-        scored.score_total = result.get("score_total", 0)
+        scored.score_total = round(result.get("score_total", 0) or 0)
         scored.salary_estimate = result.get("salary_estimate", "")
         scored.strengths = result.get("strengths", "")
         scored.red_flags = result.get("red_flags", "")
@@ -317,7 +403,16 @@ def score_pass1(jobs: list[dict], verbose: bool = True) -> list[ScoredJob]:
         if r.get("p1_failed"):
             scored._extra["p1_failed"] = True
         if scored.hard_reject:
-            scored.reject_reason = r.get("reject_reason") or r.get("reason") or "Score P1 trop bas"
+            # Un batch en échec (API, JSON illisible) ne doit JAMAIS se lire comme
+            # un rejet : l'offre n'a pas été évaluée. On le dit explicitement pour
+            # que --rescore-p1 puisse la reprendre.
+            if r.get("p1_failed"):
+                scored.reject_reason = f"ERREUR P1 — non évaluée ({str(r.get('error',''))[:60]})"
+            else:
+                scored.reject_reason = (
+                    r.get("reject_reason") or r.get("reason")
+                    or f"Rejeté par Claude P1 (score {scored.score_total}/10, sans motif retourné)"
+                )
         else:
             scored.reject_reason = ""
             scored._extra["p1_reason"] = r.get("reason", "")

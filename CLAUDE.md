@@ -201,12 +201,17 @@ URL : https://docs.google.com/spreadsheets/d/1n5dLkWlhrKI23pz9prjERm_R_wsdhEcq6S
 
 ## Profil de scoring (profile.yaml)
 
-Tous les critères sont dans `profile.yaml` — **modifier ce fichier suffit** pour changer le comportement du scoring :
-- **Rôles forts** : Head of Ops, Head of Product, Chief of Staff, GM, VP Ops, Director Ops, Head of IT, COO
-- **Rôles acceptables** : Senior PM, Ops Manager senior, Country Manager (ops), Data/AI Lead (hands-on), Head of CS (avec équipe), Head of Account Management (scope stratégique/ops)
-- **Rôles rejetés** : dev pur, data science pur, finance, RH, sales pur, IC sans équipe, junior
-- **Entreprises cibles** : startup/scale-up tech 20-300 pers., SaaS, marketplace, mobilité, énergie, retail tech, IA
-- **Salaire minimum** : 90k€ brut/an (hard reject si explicitement < 80k€)
+Tous les critères sont dans `profile.yaml` — **modifier ce fichier suffit** pour changer le comportement du scoring.
+
+**Orientation (depuis 2026-09-11) : AI Product Builder, pas management.**
+Le candidat cible les rôles où il construit lui-même des outils/produits internes avec l'IA (cf. `search_intent` dans `profile.yaml`). Les rôles de direction et de management hiérarchique lourd ne sont plus des strong match.
+
+- **Rôles forts** : Product Builder, AI Product Builder, Ops & Product Builder, Internal Product/Tools Engineer, AI Automation / Business Automation, AI Ops, AI Solutions Engineer, Product Engineer, Technical/AI Product Manager, Forward Deployed Engineer
+- **Rôles acceptables** : BizOps / Business Operations / Strategic Operations (si automation + IA + tooling), Product Ops, Data & AI Lead, Analytics Engineer, Chief of Staff, IT PM / Digital Transformation, Senior PM, Head of Ops/Product **en petite structure (<100 pers.)**
+- **Rôles rejetés** : dev logiciel classique, ML/MLOps/data science pur, DevOps/SRE/infra pur, finance, RH, sales pur, AM individuel, régie/ESN, junior, **direction dans une structure > 300 pers.**
+- **Le contenu prime sur le titre** : les prompts P1 et P2 cherchent des signaux (outils internes, automatisation, agents IA, ownership end-to-end, discovery interne). Un titre générique avec ces signaux est noté haut ; un titre prestigieux purement managérial est noté bas. En P1, un titre ambigu n'est pas rejeté (role=6) — c'est la P2 qui tranche sur la description.
+- **Entreprises cibles** : startup/scale-up tech 20-300 pers., SaaS, fintech, marketplace, mobilité, énergie, retail tech, IA
+- **Salaire minimum** : 80k€ brut/an (hard reject si explicitement < 70k€) — le marché Product Builder BE se situe souvent entre 75k et 110k
 - **Localisation** : Belgique uniquement (max 1h Bruxelles), remote/hybride accepté
 
 ## Points techniques importants

@@ -6,6 +6,7 @@ import os
 import base64
 import re
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -14,6 +15,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -21,6 +23,11 @@ SCOPES = [
 ]
 TOKEN_PATH = "token.json"
 CREDENTIALS_PATH = "credentials.json"
+
+# Pause entre deux messages.get — Gmail plafonne à 250 unités/s/utilisateur
+# et messages.get coûte 5 unités (~50 appels/s max). 0.05s laisse une marge
+# confortable tout en restant rapide (~20 emails/s).
+GMAIL_GET_DELAY = 0.05
 
 
 @dataclass
@@ -62,6 +69,51 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
+def _execute_with_retry(request, what: str, max_retries: int = 6):
+    """
+    Exécute une requête Gmail en réessayant sur les erreurs de quota (403/429).
+
+    Gmail applique une limite de 250 unités/seconde/utilisateur ; messages.get coûte
+    5 unités. Sur une fenêtre longue (--days 31), la boucle de récupération dépasse
+    cette limite et l'API renvoie 403 rateLimitExceeded. On réessaie en backoff
+    exponentiel plutôt que de laisser le scan complet échouer.
+    """
+    delay = 2.0
+    for attempt in range(max_retries):
+        try:
+            return request.execute()
+        except HttpError as e:
+            status = getattr(e.resp, "status", None)
+            retryable = status in (403, 429, 500, 503)
+            # 403 couvre aussi des erreurs définitives (permission) : on ne réessaie
+            # que si le motif est bien lié au quota / rate limit.
+            if status == 403:
+                reason = str(e)
+                retryable = ("rateLimitExceeded" in reason
+                             or "userRateLimitExceeded" in reason
+                             or "Quota exceeded" in reason)
+            if not retryable or attempt == max_retries - 1:
+                raise
+            print(f"[Gmail] Quota atteint sur {what} — pause {delay:.0f}s "
+                  f"(tentative {attempt + 1}/{max_retries})")
+            time.sleep(delay)
+            delay = min(delay * 2, 60.0)
+    return None
+
+
+def _get_message_with_retry(service, msg_id: str) -> Optional[dict]:
+    """Récupère un message ; renvoie None si l'email est inaccessible (supprimé…)."""
+    req = service.users().messages().get(userId="me", id=msg_id, format="full")
+    try:
+        return _execute_with_retry(req, f"message {msg_id}")
+    except HttpError as e:
+        # Un email isolé introuvable ne doit pas faire échouer tout le scan
+        if getattr(e.resp, "status", None) == 404:
+            print(f"[Gmail] Message {msg_id} introuvable — ignoré")
+            return None
+        raise
+
+
 def fetch_linkedin_alert_emails(service, days_back: int = 1, skip_days: int = 0) -> list[dict]:
     """Récupère les emails d'alertes LinkedIn dans la fenêtre [J-days_back, J-skip_days]."""
     since = datetime.now(timezone.utc) - timedelta(days=days_back)
@@ -85,16 +137,24 @@ def fetch_linkedin_alert_emails(service, days_back: int = 1, skip_days: int = 0)
         params = {"userId": "me", "q": query, "maxResults": 500}
         if page_token:
             params["pageToken"] = page_token
-        result = service.users().messages().list(**params).execute()
+        result = _execute_with_retry(
+            service.users().messages().list(**params), "liste des emails"
+        )
         messages.extend(result.get("messages", []))
         page_token = result.get("nextPageToken")
         if not page_token:
             break
 
     emails = []
-    for msg in messages:
-        full = service.users().messages().get(userId="me", id=msg["id"], format="full").execute()
-        emails.append(full)
+    total = len(messages)
+    for i, msg in enumerate(messages):
+        full = _get_message_with_retry(service, msg["id"])
+        if full:
+            emails.append(full)
+        # Throttle : Gmail limite à 250 unités/s/utilisateur et messages.get coûte
+        # 5 unités. Sans pause, un scan long (--days 31) dépasse le quota → 403.
+        if i + 1 < total:
+            time.sleep(GMAIL_GET_DELAY)
 
     return emails
 
@@ -130,43 +190,47 @@ def parse_jobs_from_text(text: str, email_id: str) -> list[JobOffer]:
     jobs = []
     seen_urls = set()
 
-    # Découpe en blocs par séparateur "---..." ou ligne vide multiple
-    blocks = re.split(r'-{5,}|\n{3,}', text)
+    # Lignes parasites (entête email LinkedIn, call-to-action, compteurs)
+    skip_patterns = re.compile(
+        r"votre alerte|votre offre.{0,30}(enregistr|rappel)|nouvelle.{0,10}offre|correspond|préférence|"
+        r"démarquez|recruteur|linkedin\.com|voir (toutes|l'offre)|see all|postuler maintenant|"
+        r"relations?\s*$|\d+\s+relations?|élargissez votre recherche|recommandations bas|"
+        r"\d+\s*anciens?\s*élèves?|\d+\s*alumni|\d+\s*candidat|actively recruiting|"
+        r"offres d.emploi\b|postulez avec|candidature simplifiée|easy apply|"
+        r"^(il y a|nouveau|promu|promoted|new)\b",
+        re.IGNORECASE
+    )
 
-    for i, block in enumerate(blocks):
-        lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
-        if not lines:
-            continue
+    # Chaque offre réelle est ancrée sur son lien "Voir l'offre d'emploi : <url>".
+    # On itère sur ces ancres plutôt que sur des blocs : LinkedIn insère parfois
+    # l'entête et la 1re offre dans le même bloc, et place aussi des IDs d'offres
+    # dans des paramètres de tracking (originToLandingJobPostings=ID1,ID2) — se
+    # fier au 1er ID du bloc faisait alors prendre l'entête pour le titre.
+    anchor_re = re.compile(
+        r"(?:Voir l.offre d.emploi|See job|View job)\s*:?\s*"
+        r"https://www\.linkedin\.com/(?:comm/)?jobs/view/(\d+)",
+        re.IGNORECASE
+    )
 
-        # Cherche l'URL LinkedIn jobs dans le bloc (comm/jobs/view ou jobs/view, avec ou sans slash final)
-        url_match = re.search(
-            r'https://www\.linkedin\.com/(?:comm/)?jobs/view/(\d+)[/?\s]',
-            block
-        )
-        if not url_match:
-            # Pas d'URL job dans ce bloc, ignore
-            continue
+    cursor = 0  # début des lignes descriptives de l'offre courante
+    for i, m in enumerate(anchor_re.finditer(text)):
+        job_id = m.group(1)
+        segment = text[cursor:m.start()]
+        cursor = m.end()
 
-        job_id = url_match.group(1)
         canonical_url = f"https://www.linkedin.com/jobs/view/{job_id}/"
         if canonical_url in seen_urls:
             continue
         seen_urls.add(canonical_url)
 
-        # Les lignes avant "Voir l'offre" contiennent titre, entreprise, localisation
-        # Filtre les lignes parasites (entête email LinkedIn)
-        skip_patterns = re.compile(
-            r"votre alerte|votre offre.{0,30}(enregistr|rappel)|nouvelle.{0,10}offre|correspond|préférence|"
-            r"démarquez|recruteur|linkedin\.com|voir (toutes|l'offre)|see all|postuler maintenant|"
-            r"relations?\s*$|\d+\s+relations?",
-            re.IGNORECASE
-        )
-        info_lines = []
-        for line in lines:
-            if "linkedin.com" in line.lower() or line.lower().startswith("voir") or line.lower().startswith("see"):
-                break
-            if not skip_patterns.search(line):
-                info_lines.append(line)
+        # Titre / entreprise / localisation = les 3 dernières lignes utiles
+        # juste avant l'ancre (et non les premières du bloc).
+        info_lines = [
+            l.strip() for l in segment.splitlines()
+            if l.strip()
+            and "linkedin.com" not in l.lower()
+            and not skip_patterns.search(l.strip())
+        ][-3:]
 
         title = info_lines[0] if len(info_lines) > 0 else ""
         company = info_lines[1] if len(info_lines) > 1 else ""
