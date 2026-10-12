@@ -628,6 +628,8 @@ def main():
                         help="Score en P1 toutes les lignes du Sheets dont Date P1 est vide (sans collecter les emails)")
     parser.add_argument("--p1-only", action="store_true",
                         help="Collecte + P1 + écriture Sheets, sans enrichissement RapidAPI ni P2")
+    parser.add_argument("--api-quota", action="store_true",
+                        help="Affiche le quota RapidAPI restant (crédits du mois) et quitte")
     parser.add_argument("--answer-questions", type=str, default="", metavar="LINKEDIN_ID",
                         help="Lit les questions Q1/Q2/Q3 du Sheets et génère les réponses avec Claude Sonnet")
     parser.add_argument("--adapt-cv", type=str, default="", metavar="LINKEDIN_ID",
@@ -644,6 +646,21 @@ def main():
 
     if args.adapt_cv:
         run_adapt_cv(args.adapt_cv)
+        return
+
+    if args.api_quota:
+        from job_api import get_quota_status
+        q = get_quota_status()
+        if not q:
+            print("\n[Quota] Impossible de lire le quota (RAPIDAPI_KEY absente ou API injoignable)")
+        else:
+            rem, lim = q["remaining"], q["limit"]
+            print(f"\n[Quota RapidAPI] {rem}/{lim} requête(s) restante(s) ce mois-ci")
+            if rem == 0:
+                print("[Quota] Épuisé — l'enrichissement utilisera uniquement le cache.")
+                print("[Quota] Le quota se renouvelle mensuellement (date d'abonnement RapidAPI).")
+            elif rem < 10:
+                print("[Quota] Bientôt épuisé — pense à --enrich-limit pour cibler les meilleures offres.")
         return
 
     if args.rescore_p1:

@@ -115,6 +115,37 @@ def _extract_fields(job: dict) -> dict:
     }
 
 
+def get_quota_status() -> dict:
+    """
+    Interroge le quota RapidAPI sans consommer de crédit utile.
+
+    RapidAPI renvoie les compteurs dans les en-têtes de n'importe quelle réponse,
+    y compris un 429. Retourne {remaining, limit} ou {} si indisponible.
+
+    NB : appelé avec un id invalide. Quand le quota est épuisé la requête est
+    rejetée avant traitement et ne coûte rien ; avec du quota restant, elle
+    peut en revanche consommer 1 crédit. Réservé à `--api-quota`, pas appelé
+    automatiquement dans le flux de scan.
+    """
+    api_key = os.environ.get("RAPIDAPI_KEY", "")
+    if not api_key:
+        return {}
+    try:
+        r = requests.get(
+            f"{JOBS_API_BASE}/v2/linkedin/get",
+            headers={"x-rapidapi-host": JOBS_API_HOST, "x-rapidapi-key": api_key},
+            params={"id": "0"},  # id invalide : pas de données utiles renvoyées
+            timeout=10,
+        )
+        rem = r.headers.get("X-RateLimit-Requests-Remaining")
+        lim = r.headers.get("X-RateLimit-Requests-Limit")
+        if rem is None:
+            return {}
+        return {"remaining": int(rem), "limit": int(lim) if lim else None}
+    except Exception:
+        return {}
+
+
 def fetch_job_details(linkedin_url: str) -> dict:
     """
     Récupère les détails d'une offre via /v2/linkedin/get?id=JOB_ID.
@@ -152,6 +183,13 @@ def fetch_job_details(linkedin_url: str) -> dict:
 
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response else "?"
+        # 429 = quota mensuel épuisé (50/mois) ou rate limit. On le signale pour
+        # que l'appelant arrête la boucle : insister ne fait que logguer des
+        # "Non trouvé" trompeurs sur des offres qui existent.
+        if status == 429:
+            remaining = e.response.headers.get("X-RateLimit-Requests-Remaining", "?")
+            limit = e.response.headers.get("X-RateLimit-Requests-Limit", "?")
+            return {"_quota_exceeded": True, "_remaining": remaining, "_limit": limit}
         print(f"[Job API] HTTP {status} pour job_id={job_id}: {e}")
         return {}
     except Exception as e:
@@ -187,6 +225,7 @@ def enrich_jobs_with_api(
         print(f"[Job API] Cache : {cache_hits} offre(s) déjà enrichie(s), skip API")
 
     api_call_count = 0
+    quota_exceeded = False
     jobs_to_enrich = jobs  # tous les jobs passent par la boucle ; max_jobs limite seulement les appels API réels
 
     for job in jobs_to_enrich:
@@ -211,6 +250,18 @@ def enrich_jobs_with_api(
         result = fetch_job_details(url)
         api_call_count += 1
 
+        # Quota mensuel épuisé : inutile de continuer, chaque appel suivant
+        # échouera de la même façon. On sort pour laisser les offres restantes
+        # non enrichies (elles seront reprises au renouvellement du quota).
+        if result.get("_quota_exceeded"):
+            job["api_enriched"] = False
+            quota_exceeded = True
+            print(f"\n[Job API] QUOTA MENSUEL ÉPUISÉ "
+                  f"({result.get('_remaining')}/{result.get('_limit')} requêtes restantes)")
+            print(f"[Job API] Arrêt de l'enrichissement — {len(jobs_to_enrich) - api_call_count} "
+                  f"offre(s) non traitées, à relancer après renouvellement du quota.")
+            break
+
         if result.get("description"):
             _apply_enrichment(job, result)
             job["api_enriched"] = True
@@ -226,6 +277,9 @@ def enrich_jobs_with_api(
 
     enriched = sum(1 for j in jobs_to_enrich if j.get("api_enriched"))
     print(f"[Job API] {enriched}/{len(jobs_to_enrich)} offre(s) enrichie(s) ({api_call_count} appels API, {cache_hits} cache)")
+    if quota_exceeded:
+        print("[Job API] → Les offres non enrichies gardent leur score P1 et ne sont pas")
+        print("[Job API]   scorées en P2. Relance `--rescore-p2` quand le quota est renouvelé.")
     return jobs
 
 
