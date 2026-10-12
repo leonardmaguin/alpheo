@@ -232,6 +232,16 @@ def job_to_row(job: dict) -> list:
     now = now_stamp()
     date_p1 = job.get("date_scoring_p1", now)
 
+    # P1 en échec (erreur API, JSON illisible) : l'offre n'a PAS été évaluée.
+    # On laisse Date P1 / Score P1 / Go P2? vides pour que --rescore-p1 la
+    # reprenne — écrire un 0 ferait passer une panne pour un rejet définitif.
+    if job.get("p1_failed"):
+        date_p1 = ""
+        score_p1 = ""
+        go_p2_cell = ""
+    else:
+        go_p2_cell = "GO" if go_p2 else "NO GO"
+
     return [
         now,                                                     # Date ajout
         _linkedin_id(job.get("url", "")),                        # ID LinkedIn
@@ -239,7 +249,7 @@ def job_to_row(job: dict) -> list:
         date_p1,                                                 # Date P1
         score_p1,                                                # Score P1 /10
         resume_p1,                                               # Résumé P1
-        "GO" if go_p2 else "NO GO",                              # Go P2?
+        go_p2_cell,                                              # Go P2?
         date_p2,                                                 # Date P2
         score_p2,                                                # Score P2 /10
         reco_p2,                                                 # Reco P2

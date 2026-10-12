@@ -198,6 +198,8 @@ def parse_jobs_from_text(text: str, email_id: str) -> list[JobOffer]:
         r"démarquez|recruteur|linkedin\.com|voir (toutes|l'offre)|see all|postuler maintenant|"
         r"relations?\s*$|\d+\s+relations?|élargissez votre recherche|recommandations bas|"
         r"\d+\s*anciens?\s*élèves?|\d+\s*alumni|\d+\s*candidat|actively recruiting|"
+        r"cette entreprise recrute|recrute activement|is actively hiring|"
+        r"en recherche active|réponse rapide|répond (rapidement|souvent)|"
         r"offres d.emploi\b|postulez avec|candidature simplifiée|easy apply|"
         r"^(il y a|nouveau|promu|promoted|new)\b",
         re.IGNORECASE

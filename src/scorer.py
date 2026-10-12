@@ -68,6 +68,7 @@ class ScoredJob:
                 "company_funding", "company_description",
                 "score_p1", "scored_p2", "date_scoring_p2",
                 "api_enriched", "from_cache", "recommendation", "dutch_required",
+                "p1_failed", "p2_failed",
             ) if k in job
         }
         return obj
