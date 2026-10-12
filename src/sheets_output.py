@@ -276,7 +276,26 @@ def job_to_row(job: dict) -> list:
         "",  # Response 3
         f'python main.py --answer-questions {_linkedin_id(job.get("url", ""))}',  # Answer Questions
         "",  # Adapt CV — manuel
+        "",  # Adapted CV — rempli par --adapt-cv
     ]
+
+
+def _row_aligned_to_columns(job: dict) -> list:
+    """
+    job_to_row() alignée sur COLUMNS : complète par des "" si la ligne est plus
+    courte que l'entête.
+
+    Les helpers de rescore indexent full_row par la position dans COLUMNS :
+    ajouter une colonne à COLUMNS sans ajouter sa valeur dans job_to_row()
+    provoquait un IndexError au moment de l'écriture (cas de 'Adapted CV').
+    Mieux vaut écrire une cellule vide que planter en plein rescore.
+    """
+    row = job_to_row(job)
+    if len(row) < len(COLUMNS):
+        missing = [COLUMNS[i] for i in range(len(row), len(COLUMNS))]
+        print(f"[Sheets] Colonnes sans valeur dans job_to_row() : {', '.join(missing)} — complétées à vide")
+        row = row + [""] * (len(COLUMNS) - len(row))
+    return row
 
 
 def job_to_p1_updates(job: dict, row_num: int) -> list[dict]:
@@ -284,7 +303,7 @@ def job_to_p1_updates(job: dict, row_num: int) -> list[dict]:
     Retourne une liste de dicts {range, values} pour mettre à jour uniquement les colonnes P1
     (Date P1, Score P1, Résumé P1, Go P2?), sans toucher les colonnes avant ni les manuelles.
     """
-    full_row = job_to_row(job)
+    full_row = _row_aligned_to_columns(job)
     p1_start_idx = COLUMNS.index(P1_START_COL)
     p2_start_idx = COLUMNS.index(P2_START_COL)
     updates = []
@@ -304,7 +323,7 @@ def job_to_p2_updates(job: dict, row_num: int) -> list[dict]:
     Retourne une liste de dicts {range, values} pour mettre à jour uniquement les colonnes P2,
     en sautant les colonnes manuelles (Score User, Reco User, etc.) pour ne pas les écraser.
     """
-    full_row = job_to_row(job)
+    full_row = _row_aligned_to_columns(job)
     p2_start_idx = COLUMNS.index(P2_START_COL)
     updates = []
     for i in range(p2_start_idx, len(COLUMNS)):
