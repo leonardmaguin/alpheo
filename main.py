@@ -34,6 +34,65 @@ from sheets_output import write_jobs_to_sheets, get_sheets_service, get_or_creat
 SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
 
 
+def _ask_enrich_limit(jobs: list[dict], sheets_service=None, spreadsheet_id: str = "") -> int | None:
+    """
+    Affiche la répartition des offres par score P1 et demande combien enrichir.
+
+    Les crédits RapidAPI sont limités (50/mois) : seules les offres absentes du
+    cache en consomment un, donc on compte et on propose uniquement celles-là.
+
+    Retourne le nombre d'appels API autorisés, ou None pour « toutes ».
+    En mode non interactif (cron, n8n, pipe), renvoie None sans rien demander.
+    """
+    from job_api import get_api_cache
+
+    # Offres nécessitant un vrai appel API (les autres sont gratuites via le cache)
+    try:
+        cache = get_api_cache(sheets_service, spreadsheet_id)
+    except Exception:
+        cache = {}
+    need_api = [j for j in jobs if j.get("url") not in cache]
+    cached = len(jobs) - len(need_api)
+
+    print()
+    print("     Répartition des offres retenues (score P1) :")
+    for threshold in (9, 8, 7, 6, 5):
+        n_tot = sum(1 for j in jobs if (j.get("score_p1") or 0) >= threshold)
+        n_api = sum(1 for j in need_api if (j.get("score_p1") or 0) >= threshold)
+        if n_tot:
+            print(f"       >= {threshold}/10 : {n_tot:>3} offre(s)  ({n_api} appel(s) API)")
+    if cached:
+        print(f"     {cached} offre(s) déjà en cache — enrichies gratuitement")
+    print(f"     {len(need_api)} offre(s) nécessitent un crédit RapidAPI (50/mois)")
+
+    if not need_api:
+        return None  # rien à facturer, le cache suffit
+
+    # Non interactif (cron, n8n, sortie redirigée) : ne pas bloquer
+    if not sys.stdin.isatty():
+        print("     (mode non interactif — toutes les offres sont enrichies)")
+        return None
+
+    print()
+    print(f"     Combien d'offres enrichir via l'API ? "
+          f"[Entrée = toutes ({len(need_api)}), 0 = cache uniquement]")
+    while True:
+        try:
+            answer = input("     Nombre d'appels API > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n     → interrompu, enrichissement du cache uniquement")
+            return 0
+        if answer == "":
+            return None
+        if answer.isdigit():
+            n = int(answer)
+            if n > len(need_api):
+                print(f"     Seules {len(need_api)} offres ont besoin d'un appel — on prendra ce nombre.")
+                return len(need_api)
+            return n
+        print("     Entre un nombre (ou Entrée pour tout enrichir, 0 pour aucun appel).")
+
+
 def run_test_mode():
     print("\n=== MODE TEST ===\n")
     return [
@@ -702,6 +761,19 @@ def main():
             _sid = get_or_create_spreadsheet(_sheets_svc, SPREADSHEET_ID)
         except Exception:
             _sheets_svc, _sid = None, ""
+
+        # Les crédits RapidAPI sont limités (50/mois) : montre la répartition par
+        # score et laisse choisir combien d'offres enrichir. Seules les offres
+        # absentes du cache consomment un crédit.
+        # Les crédits vont aux meilleures offres : l'enrichissement consomme la
+        # liste dans l'ordre, donc on la trie par score P1 décroissant.
+        to_enrich_dicts.sort(key=lambda d: d.get("score_p1", 0), reverse=True)
+
+        if enrich_limit is None and not args.test and not args.test_one:
+            enrich_limit = _ask_enrich_limit(to_enrich_dicts, _sheets_svc, _sid)
+            if enrich_limit == 0:
+                print("     → 0 appel API : seules les offres déjà en cache seront enrichies")
+
         to_enrich_dicts = enrich_jobs_with_api(
             to_enrich_dicts,
             max_jobs=enrich_limit,
